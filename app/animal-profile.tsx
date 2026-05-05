@@ -88,7 +88,15 @@ export default function AnimalProfileScreen() {
         ) : (
           <View style={styles.sessionList}>
             {sessions.slice(0, 20).map(session => (
-              <SessionRow key={session.id} session={session} unit={unit} />
+              <SessionRow
+                key={session.id}
+                session={session}
+                unit={unit}
+                onPress={() => router.push({
+                  pathname: '/log-milking',
+                  params: { animalId: animal.id, animalName: animal.name, sessionId: session.id },
+                })}
+              />
             ))}
           </View>
         )}
@@ -114,11 +122,18 @@ function StatCard({ label, value, hint }: { label: string; value: string; hint?:
   );
 }
 
-function SessionRow({ session, unit }: { session: any; unit: YieldUnit }) {
+function SessionRow({ session, unit, onPress }: {
+  session: any;
+  unit: YieldUnit;
+  onPress: () => void;
+}) {
   const date = new Date(session.session_time);
   const value = yieldInUnit(session.yield_lbs, unit);
   return (
-    <View style={styles.sessionRow}>
+    <Pressable
+      style={({ pressed }) => [styles.sessionRow, pressed && styles.sessionRowPressed]}
+      onPress={onPress}
+    >
       <View style={styles.sessionLeft}>
         <Text style={styles.sessionDate}>
           {date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
@@ -127,8 +142,11 @@ function SessionRow({ session, unit }: { session: any; unit: YieldUnit }) {
           <Text style={styles.sessionBadgeText}>{session.session_type}</Text>
         </View>
       </View>
-      <Text style={styles.sessionYield}>{value.toFixed(1)} {unit}</Text>
-    </View>
+      <View style={styles.sessionRight}>
+        <Text style={styles.sessionYield}>{value.toFixed(1)} {unit}</Text>
+        <Text style={styles.sessionChevron}>›</Text>
+      </View>
+    </Pressable>
   );
 }
 
@@ -194,13 +212,16 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
+  sessionRowPressed: { backgroundColor: Colors.linen },
   sessionLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  sessionRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   sessionDate: { fontSize: 14, fontWeight: '600', color: Colors.charcoal },
   sessionBadge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
   amBadge: { backgroundColor: '#FEF9E7' },
   pmBadge: { backgroundColor: '#EBF2EB' },
   sessionBadgeText: { fontSize: 11, fontWeight: '700', color: Colors.charcoal },
   sessionYield: { fontSize: 16, fontWeight: '800', color: Colors.charcoal },
+  sessionChevron: { fontSize: 22, color: Colors.charcoal, opacity: 0.3, fontWeight: '600', lineHeight: 22 },
   logButton: {
     backgroundColor: Colors.sage,
     borderRadius: 12,

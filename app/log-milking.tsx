@@ -3,12 +3,17 @@ import {
   ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Colors } from '@/constants/Colors';
-import { logMilkingSession } from '@/lib/queries/milking';
-import { logFeedUsage, getFeedInventory, FeedInventoryItem } from '@/lib/queries/feedInventory';
+import {
+  logMilkingSession, getMilkingSession, updateMilkingSession, deleteMilkingSession,
+  yieldInUnit,
+} from '@/lib/queries/milking';
+import {
+  logFeedUsage, getFeedInventory, getFeedEntriesForSession, FeedInventoryItem,
+} from '@/lib/queries/feedInventory';
 import { supabase } from '@/lib/supabase';
-import { useYieldUnit, setYieldUnitPref, YieldUnit } from '@/lib/preferences';
+import { useYieldUnit, setYieldUnitPref, initYieldUnit, YieldUnit } from '@/lib/preferences';
 
 type SessionType = 'AM' | 'PM' | 'single';
 
@@ -26,9 +31,22 @@ function newEntry(): FeedEntry {
   return { id: String(entryCounter++), feedInventoryId: null, amount: '' };
 }
 
+function formatSessionTimestamp(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleString('en-US', {
+    month: 'short', day: 'numeric',
+    hour: 'numeric', minute: '2-digit',
+  });
+}
+
 export default function LogMilkingScreen() {
-  const { animalId, animalName } = useLocalSearchParams<{ animalId: string; animalName: string }>();
+  const { animalId, animalName, sessionId } = useLocalSearchParams<{
+    animalId: string;
+    animalName: string;
+    sessionId?: string;
+  }>();
   const router = useRouter();
+  const isEdit = !!sessionId;
 
   const hour = new Date().getHours();
   const defaultSession: SessionType = hour < 12 ? 'AM' : 'PM';
@@ -39,7 +57,12 @@ export default function LogMilkingScreen() {
   const [notes, setNotes] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [prefillLoading, setPrefillLoading] = useState(isEdit);
+  const [sessionTime, setSessionTime] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const confirmTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Feed
   const [showFeed, setShowFeed] = useState(false);
@@ -54,6 +77,48 @@ export default function LogMilkingScreen() {
       });
     });
   }, []);
+
+  // Prefill in edit mode. Run once on mount; reactivity to later yieldUnit
+  // changes is intentionally skipped — matches create-mode behavior.
+  useEffect(() => {
+    if (!isEdit || !sessionId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [session, linkedFeed, prefUnit] = await Promise.all([
+          getMilkingSession(sessionId),
+          getFeedEntriesForSession(sessionId),
+          initYieldUnit(),
+        ]);
+        if (cancelled || !session) return;
+
+        setSessionType(session.session_type);
+        setSessionTime(session.session_time);
+        const displayYield = yieldInUnit(session.yield_lbs, prefUnit);
+        setYieldInput(displayYield.toFixed(2).replace(/\.?0+$/, ''));
+        setNotes(session.notes ?? '');
+        setSelectedTags(session.health_tags ?? []);
+
+        if (linkedFeed.length > 0) {
+          setShowFeed(true);
+          setFeedEntries(linkedFeed.map(f => ({
+            id: String(entryCounter++),
+            feedInventoryId: f.feed_inventory_id,
+            amount: String(f.amount),
+          })));
+        }
+      } catch (e: any) {
+        setError(e.message ?? 'Could not load session.');
+      } finally {
+        if (!cancelled) setPrefillLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]);
 
   function addFeedEntry() {
     setFeedEntries(prev => [...prev, newEntry()]);
@@ -99,26 +164,44 @@ export default function LogMilkingScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      await logMilkingSession({
-        animalId,
-        userId: user.id,
-        sessionType,
-        yieldValue: value,
-        yieldUnit,
-        notes: notes.trim() || undefined,
-        healthTags: selectedTags,
-      });
+      const feedPayload = validFeedEntries.map(e => ({
+        feedInventoryId: e.feedInventoryId!,
+        amount: parseFloat(e.amount),
+      }));
 
-      await Promise.all(
-        validFeedEntries.map(e =>
-          logFeedUsage({
+      if (isEdit && sessionId) {
+        await updateMilkingSession({
+          sessionId,
+          userId: user.id,
+          animalId,
+          sessionType,
+          yieldValue: value,
+          yieldUnit,
+          notes: notes.trim() || undefined,
+          healthTags: selectedTags,
+          feedEntries: feedPayload,
+        });
+      } else {
+        const created = await logMilkingSession({
+          animalId,
+          userId: user.id,
+          sessionType,
+          yieldValue: value,
+          yieldUnit,
+          notes: notes.trim() || undefined,
+          healthTags: selectedTags,
+        });
+
+        for (const e of feedPayload) {
+          await logFeedUsage({
             userId: user.id,
-            feedInventoryId: e.feedInventoryId!,
+            feedInventoryId: e.feedInventoryId,
             animalId,
-            amount: parseFloat(e.amount),
-          })
-        )
-      );
+            milkingSessionId: created.id,
+            amount: e.amount,
+          });
+        }
+      }
 
       router.back();
     } catch (e: any) {
@@ -128,12 +211,50 @@ export default function LogMilkingScreen() {
     }
   }
 
+  function handleDeletePress() {
+    if (!confirmingDelete) {
+      setConfirmingDelete(true);
+      if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current);
+      confirmTimeoutRef.current = setTimeout(() => setConfirmingDelete(false), 3000);
+      return;
+    }
+    if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current);
+    runDelete();
+  }
+
+  async function runDelete() {
+    if (!sessionId) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      await deleteMilkingSession(sessionId);
+      router.back();
+    } catch (e: any) {
+      setError(e.message ?? 'Failed to delete. Try again.');
+      setConfirmingDelete(false);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  if (prefillLoading) {
+    return (
+      <View style={[styles.container, { alignItems: 'center', justifyContent: 'center' }]}>
+        <ActivityIndicator color={Colors.sage} size="large" />
+      </View>
+    );
+  }
+
+  const headerSubtitle = isEdit && sessionTime
+    ? `${animalName} · ${formatSessionTimestamp(sessionTime)}`
+    : animalName;
+
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.header}>
-          <Text style={styles.title}>Log session</Text>
-          <Text style={styles.subtitle}>{animalName}</Text>
+          <Text style={styles.title}>{isEdit ? 'Edit session' : 'Log session'}</Text>
+          <Text style={styles.subtitle}>{headerSubtitle}</Text>
         </View>
 
         {error && <Text style={styles.error}>{error}</Text>}
@@ -254,13 +375,33 @@ export default function LogMilkingScreen() {
           <Pressable
             style={({ pressed }) => [styles.saveButton, pressed && styles.saveButtonPressed]}
             onPress={handleSave}
-            disabled={loading}
+            disabled={loading || deleting}
           >
             {loading
               ? <ActivityIndicator color={Colors.white} />
-              : <Text style={styles.saveButtonText}>Save session</Text>
+              : <Text style={styles.saveButtonText}>{isEdit ? 'Update session' : 'Save session'}</Text>
             }
           </Pressable>
+          {isEdit && (
+            <Pressable
+              style={({ pressed }) => [
+                styles.deleteButton,
+                confirmingDelete && styles.deleteButtonConfirming,
+                pressed && { opacity: 0.7 },
+              ]}
+              onPress={handleDeletePress}
+              disabled={loading || deleting}
+            >
+              {deleting
+                ? <ActivityIndicator color={Colors.rust} />
+                : (
+                  <Text style={styles.deleteButtonText}>
+                    {confirmingDelete ? 'Tap again to confirm delete' : 'Delete session'}
+                  </Text>
+                )
+              }
+            </Pressable>
+          )}
           <Pressable
             style={({ pressed }) => [styles.cancelButton, pressed && { opacity: 0.6 }]}
             onPress={() => router.back()}
@@ -425,4 +566,11 @@ const styles = StyleSheet.create({
   saveButtonText: { fontSize: 16, fontWeight: '700', color: Colors.white },
   cancelButton: { alignItems: 'center', paddingVertical: 12 },
   cancelText: { fontSize: 15, color: Colors.charcoal, opacity: 0.5, fontWeight: '500' },
+  deleteButton: {
+    borderWidth: 1.5, borderColor: Colors.rust, borderRadius: 12,
+    paddingVertical: 14, alignItems: 'center', minHeight: 52, justifyContent: 'center',
+    backgroundColor: 'transparent',
+  },
+  deleteButtonConfirming: { backgroundColor: '#FDF0EB' },
+  deleteButtonText: { fontSize: 15, fontWeight: '700', color: Colors.rust },
 });

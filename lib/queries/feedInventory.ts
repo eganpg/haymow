@@ -124,13 +124,33 @@ export async function deductFeedUsage(feedInventoryId: string, amountUsed: numbe
   if (error) throw error;
 }
 
+// Add quantity back to inventory — used when reverting a feed entry on edit/delete.
+export async function restoreFeedUsage(feedInventoryId: string, amountToRestore: number): Promise<void> {
+  const { data: current, error: fetchError } = await supabase
+    .from('feed_inventory')
+    .select('quantity_on_hand')
+    .eq('id', feedInventoryId)
+    .single();
+  if (fetchError) throw fetchError;
+
+  const newQuantity = (current.quantity_on_hand ?? 0) + amountToRestore;
+
+  const { error } = await supabase
+    .from('feed_inventory')
+    .update({ quantity_on_hand: newQuantity, updated_at: new Date().toISOString() })
+    .eq('id', feedInventoryId);
+  if (error) throw error;
+}
+
 export async function logFeedUsage(params: {
   userId: string;
   feedInventoryId: string;
   animalId?: string;
   flockId?: string;
   batchId?: string;
+  milkingSessionId?: string;
   amount: number;
+  entryTime?: string; // ISO; defaults to now
 }): Promise<void> {
   const { data: item, error: fetchError } = await supabase
     .from('feed_inventory')
@@ -148,7 +168,8 @@ export async function logFeedUsage(params: {
       flock_id: params.flockId ?? null,
       batch_id: params.batchId ?? null,
       feed_inventory_id: params.feedInventoryId,
-      entry_time: new Date().toISOString(),
+      milking_session_id: params.milkingSessionId ?? null,
+      entry_time: params.entryTime ?? new Date().toISOString(),
       feed_type: item.feed_type,
       amount: params.amount,
       unit: item.unit,
@@ -158,6 +179,25 @@ export async function logFeedUsage(params: {
 
   // Deduct from inventory
   await deductFeedUsage(params.feedInventoryId, params.amount);
+}
+
+export type SessionFeedEntry = {
+  id: string;
+  feed_inventory_id: string | null;
+  amount: number;
+  unit: string | null;
+  feed_type: string | null;
+  cost_per_unit: number | null;
+};
+
+export async function getFeedEntriesForSession(milkingSessionId: string): Promise<SessionFeedEntry[]> {
+  const { data, error } = await supabase
+    .from('feed_entries')
+    .select('id, feed_inventory_id, amount, unit, feed_type, cost_per_unit')
+    .eq('milking_session_id', milkingSessionId)
+    .order('entry_time', { ascending: true });
+  if (error) throw error;
+  return data ?? [];
 }
 
 export async function getPurchaseHistory(feedInventoryId: string): Promise<FeedPurchase[]> {
