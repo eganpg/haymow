@@ -6,11 +6,23 @@ This file gives Claude Code the full context needed to work on this project effe
 
 ## What This App Is
 
-**Haymow** is a production tracking app for small-scale homesteaders covering dairy animals (cows, goats, sheep) and chicken operations (layer flocks and meat bird batches). It is NOT a commercial dairy or poultry platform. The UX should feel like a personal health tracker (think Cronometer or Oura), not farm management software.
+**Haymow** is a production tracking app for small-scale homesteaders. The long-term scope covers dairy animals (cows, goats, sheep) and chicken operations (layer flocks and meat bird batches). It is NOT a commercial dairy or poultry platform. The UX should feel like a personal health tracker (think Cronometer or Oura), not farm management software.
 
 Two core insights that make this different from everything on the market:
 1. **Feed-to-yield correlation** at the individual animal/flock level
 2. **Unified homestead view** — dairy and poultry in one place, with SMS logging from the barn or coop
+
+---
+
+## V1 Focus (Locked — 2026-05-05)
+
+**v1 is dairy-first.** Launch positioning is "dairy production tracking for homesteaders" — narrow niche, focused traction. Layers and meat birds remain in the codebase and database (don't remove them), but new feature work, polish, and marketing copy default to the dairy side until further notice.
+
+**What this means for build decisions:**
+- "What next?" → pick from the dairy backlog (lactation curve, feed→yield correlation, milk processing log, dairy economics) before poultry work.
+- Don't delete poultry tables, screens, or queries. Existing scaffolding stays.
+- Don't add new poultry features unless explicitly requested.
+- Onboarding still presents all three types — Pete may still set up a flock, it's just not the launch story.
 
 ---
 
@@ -30,14 +42,17 @@ Design and build for this user. Every feature decision should be validated again
 
 ## Product Priorities (in order)
 
+V1 is dairy-first. Items marked **(v1.x)** are scaffolded but parked until dairy gets traction.
+
 1. **Speed of data entry** — logging any session must take under 30 seconds on mobile
-2. **SMS logging** — text a number from the barn or coop, data gets recorded, confirmation comes back
-3. **Dairy: Feed correlation** — show the relationship between what the cow eats and what she produces
-4. **Dairy: Lactation curve** — track Days in Milk, plot actual vs. expected Jersey curve
-5. **Layers: Egg log + cost per dozen** — daily count, lay rate %, feed cost tracked against output
-6. **Meat birds: Batch tracker** — chick-to-freezer lifecycle with cost per lb at the end
-7. **Economics across all species** — cost per gallon of milk, cost per dozen eggs, cost per lb of meat
-8. **Dairy: Processing log** — track what happened to the milk (fresh, cream, butter, cheese)
+2. **Dairy: Feed correlation** — show the relationship between what the cow eats and what she produces
+3. **Dairy: Lactation curve** — track Days in Milk, plot actual vs. expected Jersey curve
+4. **Dairy: Processing log** — track what happened to the milk (fresh, cream, butter, cheese)
+5. **Dairy: Economics** — cost per gallon of milk, feed-cost trends
+6. **SMS logging** — text a number from the barn, data gets recorded, confirmation comes back (post-v1)
+7. **Layers: Egg log + cost per dozen** — daily count, lay rate %, feed cost tracked against output *(v1.x)*
+8. **Meat birds: Batch tracker** — chick-to-freezer lifecycle with cost per lb at the end *(v1.x)*
+9. **Cross-species economics** — unified cost-per-unit dashboard across milk, eggs, meat *(v1.x)*
 
 ---
 

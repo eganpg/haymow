@@ -4,6 +4,8 @@ A milk and egg production tracking app built for small-scale homesteaders. Cover
 
 > *A haymow is where the farm stores what it produces. That's exactly what this app does.*
 
+> **V1 launch focus: dairy.** Layer and meat bird support is in the codebase and will keep shipping, but v1 launch positioning, polish, and feature investment lead with dairy production tracking.
+
 ---
 
 ## The Problem
