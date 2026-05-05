@@ -49,7 +49,15 @@ export default function FeedItemScreen() {
           <Text style={styles.name}>{item.name}</Text>
           <Text style={styles.meta}>{item.feed_type.replace(/-/g, ' ')} · {item.unit}</Text>
         </View>
-        {isLow && <View style={styles.lowBadge}><Text style={styles.lowBadgeText}>LOW STOCK</Text></View>}
+        <View style={styles.headerRight}>
+          {isLow && <View style={styles.lowBadge}><Text style={styles.lowBadgeText}>LOW STOCK</Text></View>}
+          <Pressable
+            style={({ pressed }) => [styles.editLink, pressed && { opacity: 0.6 }]}
+            onPress={() => router.push({ pathname: '/add-feed-item', params: { feedId: item.id } })}
+          >
+            <Text style={styles.editLinkText}>Edit</Text>
+          </Pressable>
+        </View>
       </View>
 
       {/* Stock card */}
@@ -103,24 +111,72 @@ export default function FeedItemScreen() {
   );
 }
 
+type RestockMode = 'weight' | 'package';
+
 function RestockModal({ visible, item, onClose, onSave }: {
   visible: boolean;
   item: FeedInventoryItem;
   onClose: () => void;
   onSave: () => Promise<void>;
 }) {
+  const [mode, setMode] = useState<RestockMode>('weight');
+
+  // weight mode
   const [quantity, setQuantity] = useState('');
   const [totalCost, setTotalCost] = useState('');
+
+  // package mode
+  const [packageCount, setPackageCount] = useState('');
+  const [packageSize, setPackageSize] = useState('');
+  const [packageCost, setPackageCost] = useState('');
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const costPerUnit = quantity && totalCost
-    ? (parseFloat(totalCost) / parseFloat(quantity)).toFixed(4)
-    : null;
+  // Compute the values that will be written, depending on mode.
+  const computed = (() => {
+    if (mode === 'weight') {
+      const qty = parseFloat(quantity);
+      const cost = parseFloat(totalCost);
+      const validQty = !isNaN(qty) && qty > 0;
+      const validCost = !isNaN(cost) && cost > 0;
+      return {
+        quantity: validQty ? qty : null,
+        totalCost: validCost ? cost : null,
+        costPerUnit: validQty && validCost ? cost / qty : null,
+      };
+    }
+    const pkgs = parseFloat(packageCount);
+    const size = parseFloat(packageSize);
+    const cost = parseFloat(packageCost);
+    const validPkgs = !isNaN(pkgs) && pkgs > 0;
+    const validSize = !isNaN(size) && size > 0;
+    const validCost = !isNaN(cost) && cost > 0;
+    const totalQty = validPkgs && validSize ? pkgs * size : null;
+    const totalCostCalc = validPkgs && validCost ? pkgs * cost : null;
+    return {
+      quantity: totalQty,
+      totalCost: totalCostCalc,
+      costPerUnit: totalQty && totalCostCalc ? totalCostCalc / totalQty : null,
+    };
+  })();
+
+  function reset() {
+    setQuantity('');
+    setTotalCost('');
+    setPackageCount('');
+    setPackageSize('');
+    setPackageCost('');
+    setError(null);
+  }
 
   async function handleSave() {
-    const qty = parseFloat(quantity);
-    if (isNaN(qty) || qty <= 0) { setError('Enter a valid quantity'); return; }
+    if (!computed.quantity) {
+      setError(mode === 'weight'
+        ? 'Enter a valid quantity'
+        : 'Enter package count and size');
+      return;
+    }
 
     setLoading(true);
     setError(null);
@@ -131,12 +187,11 @@ function RestockModal({ visible, item, onClose, onSave }: {
       await restockFeedItem({
         userId: user.id,
         feedInventoryId: item.id,
-        quantityPurchased: qty,
-        totalCost: totalCost ? parseFloat(totalCost) : undefined,
+        quantityPurchased: computed.quantity,
+        totalCost: computed.totalCost ?? undefined,
       });
 
-      setQuantity('');
-      setTotalCost('');
+      reset();
       await onSave();
     } catch (e: any) {
       setError(e.message ?? 'Something went wrong.');
@@ -158,31 +213,98 @@ function RestockModal({ visible, item, onClose, onSave }: {
             Currently: {item.quantity_on_hand.toFixed(1)} {item.unit} on hand
           </Text>
 
-          <View style={styles.field}>
-            <Text style={styles.label}>Quantity purchased ({item.unit})</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="e.g. 50"
-              value={quantity}
-              onChangeText={setQuantity}
-              keyboardType="decimal-pad"
-              autoFocus
-            />
+          {/* Mode toggle */}
+          <View style={styles.modeToggle}>
+            {(['weight', 'package'] as RestockMode[]).map(m => (
+              <Pressable
+                key={m}
+                style={[styles.modeOption, mode === m && styles.modeOptionActive]}
+                onPress={() => setMode(m)}
+              >
+                <Text style={[styles.modeOptionText, mode === m && styles.modeOptionTextActive]}>
+                  {m === 'weight' ? `By ${item.unit}` : 'By package'}
+                </Text>
+              </Pressable>
+            ))}
           </View>
 
-          <View style={styles.field}>
-            <Text style={styles.label}>Total cost ($) <Text style={styles.optional}>(optional)</Text></Text>
-            <TextInput
-              style={styles.input}
-              placeholder="e.g. 22.50"
-              value={totalCost}
-              onChangeText={setTotalCost}
-              keyboardType="decimal-pad"
-            />
-            {costPerUnit && (
-              <Text style={styles.costCalc}>${costPerUnit} per {item.unit} — will update cost</Text>
-            )}
-          </View>
+          {mode === 'weight' ? (
+            <>
+              <View style={styles.field}>
+                <Text style={styles.label}>Quantity purchased ({item.unit})</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g. 50"
+                  value={quantity}
+                  onChangeText={setQuantity}
+                  keyboardType="decimal-pad"
+                  autoFocus
+                />
+              </View>
+
+              <View style={styles.field}>
+                <Text style={styles.label}>Total cost ($) <Text style={styles.optional}>(optional)</Text></Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g. 22.50"
+                  value={totalCost}
+                  onChangeText={setTotalCost}
+                  keyboardType="decimal-pad"
+                />
+              </View>
+            </>
+          ) : (
+            <>
+              <View style={styles.field}>
+                <Text style={styles.label}>Number of packages</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g. 5"
+                  value={packageCount}
+                  onChangeText={setPackageCount}
+                  keyboardType="decimal-pad"
+                  autoFocus
+                />
+              </View>
+
+              <View style={styles.field}>
+                <Text style={styles.label}>Size per package ({item.unit})</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g. 50"
+                  value={packageSize}
+                  onChangeText={setPackageSize}
+                  keyboardType="decimal-pad"
+                />
+              </View>
+
+              <View style={styles.field}>
+                <Text style={styles.label}>Cost per package ($) <Text style={styles.optional}>(optional)</Text></Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="e.g. 15.00"
+                  value={packageCost}
+                  onChangeText={setPackageCost}
+                  keyboardType="decimal-pad"
+                />
+              </View>
+            </>
+          )}
+
+          {/* Live preview */}
+          {computed.quantity !== null && (
+            <View style={styles.preview}>
+              <Text style={styles.previewMain}>
+                + {computed.quantity.toFixed(1)} {item.unit} added
+                {computed.totalCost !== null && ` · $${computed.totalCost.toFixed(2)} total`}
+              </Text>
+              {computed.costPerUnit !== null && (
+                <Text style={styles.previewSub}>
+                  ${computed.costPerUnit.toFixed(2)} per {item.unit} — will update cost
+                </Text>
+              )}
+            </View>
+          )}
 
           {error && <Text style={styles.error}>{error}</Text>}
 
@@ -214,6 +336,9 @@ const styles = StyleSheet.create({
   meta: { fontSize: 14, color: Colors.charcoal, opacity: 0.5, textTransform: 'capitalize' },
   lowBadge: { backgroundColor: '#FDF0EB', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 },
   lowBadgeText: { fontSize: 11, fontWeight: '800', color: Colors.rust, letterSpacing: 0.5 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  editLink: { paddingVertical: 4, paddingHorizontal: 4 },
+  editLinkText: { fontSize: 15, fontWeight: '600', color: Colors.sage },
   stockCard: {
     backgroundColor: Colors.cream, borderRadius: 16, borderWidth: 1.5,
     borderColor: Colors.border, padding: 20, gap: 4,
@@ -261,6 +386,23 @@ const styles = StyleSheet.create({
     fontSize: 16, color: Colors.charcoal, minHeight: 52,
   },
   costCalc: { fontSize: 13, color: Colors.sage, fontWeight: '600', paddingLeft: 4 },
+  modeToggle: {
+    flexDirection: 'row',
+    backgroundColor: Colors.cream,
+    borderWidth: 1.5, borderColor: Colors.border,
+    borderRadius: 10, overflow: 'hidden',
+  },
+  modeOption: { flex: 1, paddingVertical: 10, alignItems: 'center' },
+  modeOptionActive: { backgroundColor: Colors.sage },
+  modeOptionText: { fontSize: 13, fontWeight: '700', color: Colors.charcoal, opacity: 0.6, textTransform: 'uppercase', letterSpacing: 0.5 },
+  modeOptionTextActive: { color: Colors.white, opacity: 1 },
+  preview: {
+    backgroundColor: '#EBF2EB',
+    borderWidth: 1.5, borderColor: Colors.sage,
+    borderRadius: 12, padding: 14, gap: 4,
+  },
+  previewMain: { fontSize: 15, fontWeight: '700', color: Colors.moss },
+  previewSub: { fontSize: 13, color: Colors.moss, opacity: 0.8 },
   error: { color: Colors.rust, fontSize: 14 },
   saveButton: {
     backgroundColor: Colors.sage, borderRadius: 12, paddingVertical: 16,

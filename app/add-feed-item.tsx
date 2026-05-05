@@ -2,11 +2,11 @@ import {
   StyleSheet, Text, View, Pressable, TextInput,
   ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform,
 } from 'react-native';
-import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useEffect, useRef, useState } from 'react';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
-import { createFeedItem } from '@/lib/queries/feedInventory';
+import { createFeedItem, updateFeedItem, deleteFeedItem } from '@/lib/queries/feedInventory';
 
 type FeedCategory = 'dairy' | 'layers' | 'meat_birds' | 'other';
 
@@ -42,8 +42,18 @@ const FEED_TYPES: Record<FeedCategory, { value: string; label: string }[]> = {
 
 const UNITS = ['lbs', 'bags', 'flakes', 'oz'];
 
+function categoryForFeedType(feedType: string): FeedCategory {
+  for (const cat of Object.keys(FEED_TYPES) as FeedCategory[]) {
+    if (FEED_TYPES[cat].some(t => t.value === feedType)) return cat;
+  }
+  return 'other';
+}
+
 export default function AddFeedItemScreen() {
+  const { feedId } = useLocalSearchParams<{ feedId?: string }>();
   const router = useRouter();
+  const isEdit = !!feedId;
+
   const [name, setName] = useState('');
   const [category, setCategory] = useState<FeedCategory>('dairy');
   const [feedType, setFeedType] = useState('grain');
@@ -52,7 +62,43 @@ export default function AddFeedItemScreen() {
   const [totalCost, setTotalCost] = useState('');
   const [lowStockAlert, setLowStockAlert] = useState('');
   const [loading, setLoading] = useState(false);
+  const [prefillLoading, setPrefillLoading] = useState(isEdit);
   const [error, setError] = useState<string | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const confirmTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!isEdit || !feedId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error: fetchError } = await supabase
+          .from('feed_inventory')
+          .select('*')
+          .eq('id', feedId)
+          .single();
+        if (fetchError) throw fetchError;
+        if (cancelled || !data) return;
+
+        setName(data.name);
+        const cat = categoryForFeedType(data.feed_type);
+        setCategory(cat);
+        setFeedType(data.feed_type);
+        setUnit(data.unit);
+        setLowStockAlert(data.low_stock_alert != null ? String(data.low_stock_alert) : '');
+      } catch (e: any) {
+        setError(e.message ?? 'Could not load feed.');
+      } finally {
+        if (!cancelled) setPrefillLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feedId]);
 
   function handleCategoryChange(c: FeedCategory) {
     setCategory(c);
@@ -66,23 +112,32 @@ export default function AddFeedItemScreen() {
   async function handleSave() {
     if (!name.trim()) { setError('Name is required'); return; }
     const qty = parseFloat(quantityOnHand);
-    if (quantityOnHand && isNaN(qty)) { setError('Enter a valid quantity'); return; }
+    if (!isEdit && quantityOnHand && isNaN(qty)) { setError('Enter a valid quantity'); return; }
 
     setLoading(true);
     setError(null);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
-
-      await createFeedItem({
-        userId: user.id,
-        name: name.trim(),
-        feedType,
-        unit,
-        quantityOnHand: qty || 0,
-        costPerUnit: costPerUnit ? parseFloat(costPerUnit) : undefined,
-        lowStockAlert: lowStockAlert ? parseFloat(lowStockAlert) : undefined,
-      });
+      if (isEdit && feedId) {
+        await updateFeedItem({
+          id: feedId,
+          name: name.trim(),
+          feedType,
+          unit,
+          lowStockAlert: lowStockAlert ? parseFloat(lowStockAlert) : null,
+        });
+      } else {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error('Not authenticated');
+        await createFeedItem({
+          userId: user.id,
+          name: name.trim(),
+          feedType,
+          unit,
+          quantityOnHand: qty || 0,
+          costPerUnit: costPerUnit ? parseFloat(costPerUnit) : undefined,
+          lowStockAlert: lowStockAlert ? parseFloat(lowStockAlert) : undefined,
+        });
+      }
 
       router.back();
     } catch (e: any) {
@@ -92,13 +147,48 @@ export default function AddFeedItemScreen() {
     }
   }
 
+  function handleDeletePress() {
+    if (!confirmingDelete) {
+      setConfirmingDelete(true);
+      if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current);
+      confirmTimeoutRef.current = setTimeout(() => setConfirmingDelete(false), 3000);
+      return;
+    }
+    if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current);
+    runDelete();
+  }
+
+  async function runDelete() {
+    if (!feedId) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      await deleteFeedItem(feedId);
+      // The previous screen (feed-item) won't exist anymore — go to feed-management instead.
+      router.replace('/feed-management');
+    } catch (e: any) {
+      setError(e.message ?? 'Failed to delete.');
+      setConfirmingDelete(false);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  if (prefillLoading) {
+    return (
+      <View style={[styles.container, { alignItems: 'center', justifyContent: 'center' }]}>
+        <ActivityIndicator color={Colors.sage} size="large" />
+      </View>
+    );
+  }
+
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Pressable onPress={() => router.back()} style={styles.backButton}>
           <Text style={styles.backText}>← Cancel</Text>
         </Pressable>
-        <Text style={styles.title}>Add feed</Text>
+        <Text style={styles.title}>{isEdit ? 'Edit feed' : 'Add feed'}</Text>
 
         {/* Name */}
         <Field label="Name" required hint="e.g. Purina Strategy, Coastal hay, Nutrena layer pellets">
@@ -161,30 +251,33 @@ export default function AddFeedItemScreen() {
           </View>
         </Field>
 
-        {/* Current stock */}
-        <Field label={`How much do you have on hand? (${unit})`}>
-          <TextInput
-            style={styles.input}
-            placeholder="e.g. 50"
-            value={quantityOnHand}
-            onChangeText={setQuantityOnHand}
-            keyboardType="decimal-pad"
-          />
-        </Field>
+        {/* Current stock + cost — only on create. In edit mode, stock changes via Restock. */}
+        {!isEdit && (
+          <>
+            <Field label={`How much do you have on hand? (${unit})`}>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g. 50"
+                value={quantityOnHand}
+                onChangeText={setQuantityOnHand}
+                keyboardType="decimal-pad"
+              />
+            </Field>
 
-        {/* Cost */}
-        <Field label="What did you pay? ($)" hint="Total cost for the quantity above — cost per unit is calculated automatically">
-          <TextInput
-            style={styles.input}
-            placeholder="e.g. 22.50"
-            value={totalCost}
-            onChangeText={setTotalCost}
-            keyboardType="decimal-pad"
-          />
-          {costPerUnit && (
-            <Text style={styles.costCalc}>${costPerUnit} per {unit}</Text>
-          )}
-        </Field>
+            <Field label="What did you pay? ($)" hint="Total cost for the quantity above — cost per unit is calculated automatically">
+              <TextInput
+                style={styles.input}
+                placeholder="e.g. 22.50"
+                value={totalCost}
+                onChangeText={setTotalCost}
+                keyboardType="decimal-pad"
+              />
+              {costPerUnit && (
+                <Text style={styles.costCalc}>${costPerUnit} per {unit}</Text>
+              )}
+            </Field>
+          </>
+        )}
 
         {/* Low stock alert */}
         <Field label={`Low stock alert (${unit})`} hint="Get a warning when quantity falls below this">
@@ -202,13 +295,34 @@ export default function AddFeedItemScreen() {
         <Pressable
           style={({ pressed }) => [styles.saveButton, pressed && { opacity: 0.8 }]}
           onPress={handleSave}
-          disabled={loading}
+          disabled={loading || deleting}
         >
           {loading
             ? <ActivityIndicator color={Colors.white} />
-            : <Text style={styles.saveButtonText}>Save</Text>
+            : <Text style={styles.saveButtonText}>{isEdit ? 'Save changes' : 'Save'}</Text>
           }
         </Pressable>
+
+        {isEdit && (
+          <Pressable
+            style={({ pressed }) => [
+              styles.deleteButton,
+              confirmingDelete && styles.deleteButtonConfirming,
+              pressed && { opacity: 0.7 },
+            ]}
+            onPress={handleDeletePress}
+            disabled={loading || deleting}
+          >
+            {deleting
+              ? <ActivityIndicator color={Colors.rust} />
+              : (
+                <Text style={styles.deleteButtonText}>
+                  {confirmingDelete ? 'Tap again to confirm delete' : 'Delete feed'}
+                </Text>
+              )
+            }
+          </Pressable>
+        )}
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -264,4 +378,11 @@ const styles = StyleSheet.create({
     alignItems: 'center', minHeight: 56, justifyContent: 'center', marginTop: 8,
   },
   saveButtonText: { fontSize: 16, fontWeight: '700', color: Colors.white },
+  deleteButton: {
+    borderWidth: 1.5, borderColor: Colors.rust, borderRadius: 12,
+    paddingVertical: 14, alignItems: 'center', minHeight: 52, justifyContent: 'center',
+    backgroundColor: 'transparent',
+  },
+  deleteButtonConfirming: { backgroundColor: '#FDF0EB' },
+  deleteButtonText: { fontSize: 15, fontWeight: '700', color: Colors.rust },
 });

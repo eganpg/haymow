@@ -60,6 +60,51 @@ export async function createFeedItem(params: {
   return data;
 }
 
+export async function updateFeedItem(params: {
+  id: string;
+  name: string;
+  feedType: string;
+  unit: string;
+  lowStockAlert?: number | null;
+}): Promise<void> {
+  const { error } = await supabase
+    .from('feed_inventory')
+    .update({
+      name: params.name,
+      feed_type: params.feedType,
+      unit: params.unit,
+      low_stock_alert: params.lowStockAlert ?? null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', params.id);
+  if (error) throw error;
+}
+
+// Hard-delete only if no feed_entries reference this item.
+// Cascade-deletes feed_purchases (history) since the parent inventory row is going.
+export async function deleteFeedItem(feedInventoryId: string): Promise<void> {
+  const { count, error: countError } = await supabase
+    .from('feed_entries')
+    .select('id', { count: 'exact', head: true })
+    .eq('feed_inventory_id', feedInventoryId);
+  if (countError) throw countError;
+  if (count && count > 0) {
+    throw new Error(`This feed has ${count} usage ${count === 1 ? 'entry' : 'entries'} logged — can't delete.`);
+  }
+
+  const { error: purchasesError } = await supabase
+    .from('feed_purchases')
+    .delete()
+    .eq('feed_inventory_id', feedInventoryId);
+  if (purchasesError) throw purchasesError;
+
+  const { error } = await supabase
+    .from('feed_inventory')
+    .delete()
+    .eq('id', feedInventoryId);
+  if (error) throw error;
+}
+
 // Log a purchase: adds quantity to inventory and updates cost_per_unit
 export async function restockFeedItem(params: {
   userId: string;
