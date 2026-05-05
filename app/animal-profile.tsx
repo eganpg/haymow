@@ -6,11 +6,13 @@ import { useCallback, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
-import { getRecentSessions, toGallons, getDIM } from '@/lib/queries/milking';
+import { getRecentSessions, yieldInUnit, getDIM } from '@/lib/queries/milking';
+import { useYieldUnit, YieldUnit } from '@/lib/preferences';
 
 export default function AnimalProfileScreen() {
   const { animalId } = useLocalSearchParams<{ animalId: string }>();
   const router = useRouter();
+  const unit = useYieldUnit();
   const [animal, setAnimal] = useState<any>(null);
   const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -44,7 +46,7 @@ export default function AnimalProfileScreen() {
       cutoff.setDate(cutoff.getDate() - 7);
       return new Date(s.session_time) >= cutoff;
     })
-    .reduce((sum, s) => sum + toGallons(s.yield_lbs), 0);
+    .reduce((sum, s) => sum + yieldInUnit(s.yield_lbs, unit), 0);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -66,7 +68,7 @@ export default function AnimalProfileScreen() {
       {/* Stats */}
       <View style={styles.statsRow}>
         <StatCard label="Days in milk" value={dim !== null ? String(dim) : '—'} />
-        <StatCard label="7-day total" value={`${sevenDayTotal.toFixed(1)} gal`} />
+        <StatCard label="7-day total" value={`${sevenDayTotal.toFixed(1)} ${unit}`} />
         <StatCard label="Sessions" value={String(sessions.length)} hint="14 days" />
       </View>
 
@@ -86,7 +88,7 @@ export default function AnimalProfileScreen() {
         ) : (
           <View style={styles.sessionList}>
             {sessions.slice(0, 20).map(session => (
-              <SessionRow key={session.id} session={session} />
+              <SessionRow key={session.id} session={session} unit={unit} />
             ))}
           </View>
         )}
@@ -112,9 +114,9 @@ function StatCard({ label, value, hint }: { label: string; value: string; hint?:
   );
 }
 
-function SessionRow({ session }: { session: any }) {
+function SessionRow({ session, unit }: { session: any; unit: YieldUnit }) {
   const date = new Date(session.session_time);
-  const gallons = toGallons(session.yield_lbs);
+  const value = yieldInUnit(session.yield_lbs, unit);
   return (
     <View style={styles.sessionRow}>
       <View style={styles.sessionLeft}>
@@ -125,7 +127,7 @@ function SessionRow({ session }: { session: any }) {
           <Text style={styles.sessionBadgeText}>{session.session_type}</Text>
         </View>
       </View>
-      <Text style={styles.sessionYield}>{gallons.toFixed(1)} gal</Text>
+      <Text style={styles.sessionYield}>{value.toFixed(1)} {unit}</Text>
     </View>
   );
 }

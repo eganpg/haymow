@@ -6,31 +6,7 @@ import { useRouter } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
 import { signOut } from '@/lib/auth';
-import * as SecureStore from 'expo-secure-store';
-import { Platform } from 'react-native';
-
-const UNIT_KEY = 'haymow_yield_unit';
-
-async function getStoredUnit(): Promise<'gal' | 'lbs'> {
-  try {
-    const val = Platform.OS === 'web'
-      ? localStorage.getItem(UNIT_KEY)
-      : await SecureStore.getItemAsync(UNIT_KEY);
-    return val === 'lbs' ? 'lbs' : 'gal';
-  } catch {
-    return 'gal';
-  }
-}
-
-async function storeUnit(unit: 'gal' | 'lbs') {
-  try {
-    if (Platform.OS === 'web') {
-      localStorage.setItem(UNIT_KEY, unit);
-    } else {
-      await SecureStore.setItemAsync(UNIT_KEY, unit);
-    }
-  } catch {}
-}
+import { useYieldUnit, setYieldUnitPref } from '@/lib/preferences';
 
 type UserInfo = {
   email: string;
@@ -41,7 +17,7 @@ type UserInfo = {
 export default function SettingsScreen() {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [tier, setTier] = useState<string>('free');
-  const [yieldUnit, setYieldUnit] = useState<'gal' | 'lbs'>('gal');
+  const yieldUnit = useYieldUnit();
   const [signingOut, setSigningOut] = useState(false);
   const router = useRouter();
 
@@ -63,17 +39,12 @@ export default function SettingsScreen() {
 
         if (sub) setTier(sub.is_founding_member ? 'homestead (founding member)' : sub.tier);
       }
-
-      const unit = await getStoredUnit();
-      setYieldUnit(unit);
     }
     load();
   }, []);
 
-  async function handleUnitToggle(val: boolean) {
-    const unit = val ? 'lbs' : 'gal';
-    setYieldUnit(unit);
-    await storeUnit(unit);
+  function handleUnitToggle(val: boolean) {
+    setYieldUnitPref(val ? 'lbs' : 'gal');
   }
 
   async function handleSignOut() {

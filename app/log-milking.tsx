@@ -8,6 +8,7 @@ import { Colors } from '@/constants/Colors';
 import { logMilkingSession } from '@/lib/queries/milking';
 import { logFeedUsage, getFeedInventory, FeedInventoryItem } from '@/lib/queries/feedInventory';
 import { supabase } from '@/lib/supabase';
+import { useYieldUnit, setYieldUnitPref, YieldUnit } from '@/lib/preferences';
 
 type SessionType = 'AM' | 'PM' | 'single';
 
@@ -32,6 +33,7 @@ export default function LogMilkingScreen() {
   const hour = new Date().getHours();
   const defaultSession: SessionType = hour < 12 ? 'AM' : 'PM';
 
+  const yieldUnit = useYieldUnit();
   const [sessionType, setSessionType] = useState<SessionType>(defaultSession);
   const [yieldInput, setYieldInput] = useState('');
   const [notes, setNotes] = useState('');
@@ -72,9 +74,9 @@ export default function LogMilkingScreen() {
   }
 
   async function handleSave() {
-    const gallons = parseFloat(yieldInput);
-    if (isNaN(gallons) || gallons <= 0) {
-      setError('Enter a valid yield (gallons)');
+    const value = parseFloat(yieldInput);
+    if (isNaN(value) || value <= 0) {
+      setError(`Enter a valid yield (${yieldUnit === 'lbs' ? 'lbs' : 'gallons'})`);
       return;
     }
 
@@ -101,7 +103,8 @@ export default function LogMilkingScreen() {
         animalId,
         userId: user.id,
         sessionType,
-        yieldGallons: gallons,
+        yieldValue: value,
+        yieldUnit,
         notes: notes.trim() || undefined,
         healthTags: selectedTags,
       });
@@ -155,10 +158,25 @@ export default function LogMilkingScreen() {
 
         {/* Yield */}
         <View style={styles.section}>
-          <Text style={styles.label}>Yield <Text style={styles.dim}>(gallons)</Text></Text>
+          <View style={styles.yieldHeader}>
+            <Text style={styles.label}>Yield</Text>
+            <View style={styles.unitToggle}>
+              {(['gal', 'lbs'] as YieldUnit[]).map(u => (
+                <Pressable
+                  key={u}
+                  style={[styles.unitOption, yieldUnit === u && styles.unitOptionActive]}
+                  onPress={() => setYieldUnitPref(u)}
+                >
+                  <Text style={[styles.unitOptionText, yieldUnit === u && styles.unitOptionTextActive]}>
+                    {u}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
           <TextInput
             style={styles.input}
-            placeholder="e.g. 3.2"
+            placeholder={yieldUnit === 'lbs' ? 'e.g. 27.5' : 'e.g. 3.2'}
             value={yieldInput}
             onChangeText={setYieldInput}
             keyboardType="decimal-pad"
@@ -343,6 +361,19 @@ const styles = StyleSheet.create({
     fontSize: 18, color: Colors.charcoal, minHeight: 52,
   },
   notesInput: { fontSize: 15, minHeight: 80, textAlignVertical: 'top' },
+  yieldHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  unitToggle: {
+    flexDirection: 'row',
+    backgroundColor: Colors.cream,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  unitOption: { paddingHorizontal: 14, paddingVertical: 6, minWidth: 48, alignItems: 'center' },
+  unitOptionActive: { backgroundColor: Colors.sage },
+  unitOptionText: { fontSize: 13, fontWeight: '700', color: Colors.charcoal, opacity: 0.5, textTransform: 'uppercase', letterSpacing: 0.5 },
+  unitOptionTextActive: { color: Colors.white, opacity: 1 },
   feedToggleRow: { paddingVertical: 4 },
   feedToggleText: { fontSize: 15, fontWeight: '600', color: Colors.sage },
   feedBlock: {

@@ -14,6 +14,14 @@ export const LBS_PER_GALLON = 8.6;
 export const toGallons = (lbs: number) => lbs / LBS_PER_GALLON;
 export const toLbs = (gallons: number) => gallons * LBS_PER_GALLON;
 
+export type YieldUnit = 'gal' | 'lbs';
+
+export const yieldInUnit = (lbs: number, unit: YieldUnit): number =>
+  unit === 'lbs' ? lbs : toGallons(lbs);
+
+export const yieldToLbs = (value: number, unit: YieldUnit): number =>
+  unit === 'lbs' ? value : toLbs(value);
+
 export async function getTodaysSessions(animalId: string): Promise<MilkingSession[]> {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -36,7 +44,8 @@ export async function logMilkingSession(params: {
   animalId: string;
   userId: string;
   sessionType: 'AM' | 'PM' | 'single';
-  yieldGallons: number;
+  yieldValue: number;
+  yieldUnit: YieldUnit;
   notes?: string;
   healthTags?: string[];
 }) {
@@ -47,7 +56,7 @@ export async function logMilkingSession(params: {
       user_id: params.userId,
       session_time: new Date().toISOString(),
       session_type: params.sessionType,
-      yield_lbs: toLbs(params.yieldGallons),
+      yield_lbs: yieldToLbs(params.yieldValue, params.yieldUnit),
       notes: params.notes ?? null,
       health_tags: params.healthTags ?? [],
       created_via: 'app',

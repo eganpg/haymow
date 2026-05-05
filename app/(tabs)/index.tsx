@@ -7,8 +7,9 @@ import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
-import { getTodaysSessions, toGallons, getDIM, MilkingSession } from '@/lib/queries/milking';
+import { getTodaysSessions, yieldInUnit, getDIM, MilkingSession } from '@/lib/queries/milking';
 import { getTodaysCollection, getLayRate, EggCollection } from '@/lib/queries/eggs';
+import { useYieldUnit } from '@/lib/preferences';
 
 type Animal = {
   id: string;
@@ -37,6 +38,7 @@ type LayerCard = {
 
 export default function TodayScreen() {
   const router = useRouter();
+  const unit = useYieldUnit();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [dairy, setDairy] = useState<DairyCard[]>([]);
@@ -116,6 +118,7 @@ export default function TodayScreen() {
             key={animal.id}
             animal={animal}
             sessions={sessions}
+            unit={unit}
             onLog={() => router.push({ pathname: '/log-milking', params: { animalId: animal.id, animalName: animal.name } })}
           />
         ))}
@@ -139,12 +142,13 @@ export default function TodayScreen() {
   );
 }
 
-function DairyCard({ animal, sessions, onLog }: {
+function DairyCard({ animal, sessions, unit, onLog }: {
   animal: Animal;
   sessions: MilkingSession[];
+  unit: 'gal' | 'lbs';
   onLog: () => void;
 }) {
-  const totalGallons = sessions.reduce((sum, s) => sum + toGallons(s.yield_lbs), 0);
+  const total = sessions.reduce((sum, s) => sum + yieldInUnit(s.yield_lbs, unit), 0);
   const hasAM = sessions.some(s => s.session_type === 'AM');
   const hasPM = sessions.some(s => s.session_type === 'PM');
   const dim = animal.freshening_date ? getDIM(animal.freshening_date) : null;
@@ -161,9 +165,9 @@ function DairyCard({ animal, sessions, onLog }: {
 
       <View style={styles.metric}>
         <Text style={styles.metricValue}>
-          {totalGallons > 0 ? totalGallons.toFixed(1) : '—'}
+          {total > 0 ? total.toFixed(1) : '—'}
         </Text>
-        <Text style={styles.metricUnit}>gal today</Text>
+        <Text style={styles.metricUnit}>{unit === 'lbs' ? 'lbs today' : 'gal today'}</Text>
       </View>
 
       <View style={styles.sessionRow}>
