@@ -14,6 +14,7 @@ import {
 } from '@/lib/queries/feedInventory';
 import { supabase } from '@/lib/supabase';
 import { useYieldUnit, setYieldUnitPref, initYieldUnit, YieldUnit } from '@/lib/preferences';
+import { DateTimeField } from '@/components/DateTimeField';
 
 type SessionType = 'AM' | 'PM' | 'single';
 
@@ -58,7 +59,8 @@ export default function LogMilkingScreen() {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [prefillLoading, setPrefillLoading] = useState(isEdit);
-  const [sessionTime, setSessionTime] = useState<string | null>(null);
+  const [sessionTime, setSessionTime] = useState<string>(() => new Date().toISOString());
+  const [showTimePicker, setShowTimePicker] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -177,6 +179,7 @@ export default function LogMilkingScreen() {
           sessionType,
           yieldValue: value,
           yieldUnit,
+          sessionTime,
           notes: notes.trim() || undefined,
           healthTags: selectedTags,
           feedEntries: feedPayload,
@@ -188,6 +191,7 @@ export default function LogMilkingScreen() {
           sessionType,
           yieldValue: value,
           yieldUnit,
+          sessionTime,
           notes: notes.trim() || undefined,
           healthTags: selectedTags,
         });
@@ -199,6 +203,7 @@ export default function LogMilkingScreen() {
             animalId,
             milkingSessionId: created.id,
             amount: e.amount,
+            entryTime: sessionTime,
           });
         }
       }
@@ -245,19 +250,43 @@ export default function LogMilkingScreen() {
     );
   }
 
-  const headerSubtitle = isEdit && sessionTime
-    ? `${animalName} · ${formatSessionTimestamp(sessionTime)}`
-    : animalName;
-
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.header}>
           <Text style={styles.title}>{isEdit ? 'Edit session' : 'Log session'}</Text>
-          <Text style={styles.subtitle}>{headerSubtitle}</Text>
+          <Text style={styles.subtitle}>{animalName}</Text>
         </View>
 
         {error && <Text style={styles.error}>{error}</Text>}
+
+        {/* Logged at */}
+        <View style={styles.section}>
+          {!showTimePicker ? (
+            <Pressable style={styles.timeRow} onPress={() => setShowTimePicker(true)}>
+              <Text style={styles.timeRowLabel}>Logged at</Text>
+              <View style={styles.timeRowRight}>
+                <Text style={styles.timeRowValue}>{formatSessionTimestamp(sessionTime)}</Text>
+                <Text style={styles.timeRowChange}>Change</Text>
+              </View>
+            </Pressable>
+          ) : (
+            <View style={styles.timePickerBlock}>
+              <Text style={styles.label}>Logged at</Text>
+              <DateTimeField
+                value={sessionTime}
+                onChange={setSessionTime}
+                onError={setError}
+              />
+              <Pressable
+                style={styles.timePickerDone}
+                onPress={() => setShowTimePicker(false)}
+              >
+                <Text style={styles.timePickerDoneText}>Done</Text>
+              </Pressable>
+            </View>
+          )}
+        </View>
 
         {/* Session type */}
         <View style={styles.section}>
@@ -502,6 +531,18 @@ const styles = StyleSheet.create({
     fontSize: 18, color: Colors.charcoal, minHeight: 52,
   },
   notesInput: { fontSize: 15, minHeight: 80, textAlignVertical: 'top' },
+  timeRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: Colors.cream, borderWidth: 1.5, borderColor: Colors.border,
+    borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, minHeight: 52,
+  },
+  timeRowLabel: { fontSize: 15, fontWeight: '600', color: Colors.charcoal },
+  timeRowRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  timeRowValue: { fontSize: 15, color: Colors.charcoal, opacity: 0.65, fontWeight: '500' },
+  timeRowChange: { fontSize: 14, color: Colors.sage, fontWeight: '700' },
+  timePickerBlock: { gap: 10 },
+  timePickerDone: { alignSelf: 'flex-start', paddingVertical: 6, paddingHorizontal: 12 },
+  timePickerDoneText: { fontSize: 14, fontWeight: '700', color: Colors.sage },
   yieldHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   unitToggle: {
     flexDirection: 'row',

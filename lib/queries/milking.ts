@@ -51,6 +51,7 @@ export async function logMilkingSession(params: {
   sessionType: 'AM' | 'PM' | 'single';
   yieldValue: number;
   yieldUnit: YieldUnit;
+  sessionTime?: string; // ISO; defaults to now
   notes?: string;
   healthTags?: string[];
 }) {
@@ -59,7 +60,7 @@ export async function logMilkingSession(params: {
     .insert({
       animal_id: params.animalId,
       user_id: params.userId,
-      session_time: new Date().toISOString(),
+      session_time: params.sessionTime ?? new Date().toISOString(),
       session_type: params.sessionType,
       yield_lbs: yieldToLbs(params.yieldValue, params.yieldUnit),
       notes: params.notes ?? null,
@@ -90,14 +91,16 @@ export async function updateMilkingSession(params: {
   sessionType: 'AM' | 'PM' | 'single';
   yieldValue: number;
   yieldUnit: YieldUnit;
+  sessionTime: string; // ISO
   notes?: string;
   healthTags?: string[];
   feedEntries: Array<{ feedInventoryId: string; amount: number }>;
 }) {
-  // 1. Update the session itself (session_time stays fixed).
+  // 1. Update the session row, including session_time so the user can correct it.
   const { error: updateError } = await supabase
     .from('milking_sessions')
     .update({
+      session_time: params.sessionTime,
       session_type: params.sessionType,
       yield_lbs: yieldToLbs(params.yieldValue, params.yieldUnit),
       notes: params.notes ?? null,
@@ -124,10 +127,8 @@ export async function updateMilkingSession(params: {
     if (deleteError) throw deleteError;
   }
 
-  // 3. Re-log new feed entries against the session.
-  const session = await getMilkingSession(params.sessionId);
-  const entryTime = session?.session_time ?? new Date().toISOString();
-
+  // 3. Re-log new feed entries with entry_time matching the session — keeps
+  //    the feed→yield correlation join (12h window) consistent.
   for (const e of params.feedEntries) {
     await logFeedUsage({
       userId: params.userId,
@@ -135,7 +136,7 @@ export async function updateMilkingSession(params: {
       animalId: params.animalId,
       milkingSessionId: params.sessionId,
       amount: e.amount,
-      entryTime,
+      entryTime: params.sessionTime,
     });
   }
 }
