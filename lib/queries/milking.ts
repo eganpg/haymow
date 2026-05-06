@@ -1,3 +1,9 @@
+// Milking session queries — the heart of the dairy side of the app.
+// Handles logging, editing, and deleting milking sessions, plus aggregations for
+// the Today and Trends screens. Sessions are linked to feed entries via
+// feed_entries.milking_session_id (added in migration 003), so edits and deletes
+// here also need to manage the associated inventory bookkeeping.
+
 import { supabase } from '../supabase';
 import {
   restoreFeedUsage,
@@ -5,6 +11,8 @@ import {
   logFeedUsage,
 } from './feedInventory';
 
+// Shape returned by all the read functions below. yield_lbs is always in pounds —
+// the gallon/lbs conversion happens in the UI layer based on user preference.
 export type MilkingSession = {
   id: string;
   animal_id: string;
@@ -15,18 +23,29 @@ export type MilkingSession = {
   health_tags: string[] | null;
 };
 
+// Average density of Jersey whole milk. Used everywhere we convert between gallons
+// and lbs. Storage is always in lbs (more precise for partial measurements with
+// a kitchen scale); display flips based on user preference.
 export const LBS_PER_GALLON = 8.6;
 export const toGallons = (lbs: number) => lbs / LBS_PER_GALLON;
 export const toLbs = (gallons: number) => gallons * LBS_PER_GALLON;
 
 export type YieldUnit = 'gal' | 'lbs';
 
+// Convert a stored lbs value into the user's preferred display unit. If they're
+// already on lbs, this is a no-op; gal flips through the conversion.
 export const yieldInUnit = (lbs: number, unit: YieldUnit): number =>
   unit === 'lbs' ? lbs : toGallons(lbs);
 
+// Inverse of yieldInUnit — take a value the user typed in their preferred unit
+// and convert to lbs for storage. Used by every place that writes a yield.
 export const yieldToLbs = (value: number, unit: YieldUnit): number =>
   unit === 'lbs' ? value : toLbs(value);
 
+// Today's milking sessions for an animal, in chronological order.
+// Used by the Today screen to compute daily totals and AM/PM checkmarks.
+// Day boundaries are local time (setHours(0,0,0,0)) so a 5am session today
+// doesn't accidentally show up under "yesterday."
 export async function getTodaysSessions(animalId: string): Promise<MilkingSession[]> {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -45,6 +64,9 @@ export async function getTodaysSessions(animalId: string): Promise<MilkingSessio
   return data ?? [];
 }
 
+// Insert a new milking session row. yieldValue can be in either gallons or lbs;
+// we always normalize to lbs for storage. Doesn't touch feed entries — the caller
+// (log-milking.tsx) handles those separately via logFeedUsage().
 export async function logMilkingSession(params: {
   animalId: string;
   userId: string;
@@ -74,6 +96,9 @@ export async function logMilkingSession(params: {
   return data;
 }
 
+// Fetch a single session by id. Used by the edit-session screen to populate the form.
+// maybeSingle() returns null (instead of erroring) if the row is gone — defensive
+// for the case where someone deletes a session in another tab while you're editing.
 export async function getMilkingSession(sessionId: string): Promise<MilkingSession | null> {
   const { data, error } = await supabase
     .from('milking_sessions')
@@ -84,6 +109,11 @@ export async function getMilkingSession(sessionId: string): Promise<MilkingSessi
   return data;
 }
 
+// Update an existing milking session, including reconciling its feed entries.
+// The reconciliation strategy is "lazy diff": revert all old feed deductions, delete
+// the old feed_entries rows, then re-log the new feed list. This is simpler than
+// trying to compute a delta, and inventory ends up in the same final state.
+// session_time is updatable too — the user can correct a wrong AM/PM timestamp.
 export async function updateMilkingSession(params: {
   sessionId: string;
   userId: string;
@@ -141,8 +171,14 @@ export async function updateMilkingSession(params: {
   }
 }
 
+// Delete a milking session and undo its feed-inventory side effects.
+// We do this in app code (not via DB cascade) because we need to RESTORE inventory
+// for each linked feed entry before deleting it — a cascade would just drop the rows
+// and leave inventory understated forever.
+// The migration's ON DELETE SET NULL on feed_entries.milking_session_id is the
+// safety net for cases where a session somehow gets deleted through another path.
 export async function deleteMilkingSession(sessionId: string) {
-  // Restore inventory for any linked feed entries before removing them.
+  // Step 1: revert each linked feed deduction so inventory matches reality.
   const linkedFeed = await getFeedEntriesForSession(sessionId);
   for (const entry of linkedFeed) {
     if (entry.feed_inventory_id) {
@@ -150,6 +186,7 @@ export async function deleteMilkingSession(sessionId: string) {
     }
   }
 
+  // Step 2: delete the feed_entries rows themselves (no longer needed).
   if (linkedFeed.length > 0) {
     const { error: feedDeleteError } = await supabase
       .from('feed_entries')
@@ -158,6 +195,7 @@ export async function deleteMilkingSession(sessionId: string) {
     if (feedDeleteError) throw feedDeleteError;
   }
 
+  // Step 3: delete the session.
   const { error } = await supabase
     .from('milking_sessions')
     .delete()
@@ -165,6 +203,8 @@ export async function deleteMilkingSession(sessionId: string) {
   if (error) throw error;
 }
 
+// Last N days of milking sessions for an animal, newest first.
+// Used by the dairy animal profile screen to render the "recent sessions" list.
 export async function getRecentSessions(animalId: string, days = 7): Promise<MilkingSession[]> {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - days);
@@ -180,12 +220,18 @@ export async function getRecentSessions(animalId: string, days = 7): Promise<Mil
   return data ?? [];
 }
 
+// One day's aggregated yield. The Trends chart consumes an array of these.
+// sessionCount is included so we can compute a per-day average that ignores days
+// with no sessions logged — important because a missed log shouldn't drag the
+// average down.
 export type DailyYield = {
   date: string;       // YYYY-MM-DD, local time
   totalLbs: number;
   sessionCount: number;
 };
 
+// Local-time date key. See the same helper in feed.ts for the full rationale —
+// short version: avoid UTC bucketing so 11pm sessions don't bleed into tomorrow.
 function localDateKey(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -193,6 +239,11 @@ function localDateKey(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+// Daily yield totals for an animal over the last `days` days.
+// Returns one entry per day in the window (including zeros) so the Trends chart
+// renders a continuous timeline. Aggregation is done in JS rather than SQL because
+// the dataset is small (≤ ~180 rows for 90 days) and the date-bucketing-in-local-time
+// logic is awkward to express portably in a Supabase query.
 export async function getDailyYields(animalId: string, days: number): Promise<DailyYield[]> {
   const start = new Date();
   start.setHours(0, 0, 0, 0);
@@ -223,6 +274,9 @@ export async function getDailyYields(animalId: string, days: number): Promise<Da
   return Array.from(buckets, ([date, b]) => ({ date, ...b }));
 }
 
+// Days In Milk — how many days a dairy cow has been lactating.
+// Calculated from her freshening (calving) date. Drives the lactation curve view
+// and shows up as "Day N" on her profile and the Today card. Pure math; no DB hit.
 export function getDIM(fresheningDate: string): number {
   const freshening = new Date(fresheningDate);
   const today = new Date();

@@ -1,7 +1,18 @@
+// Create-side queries for the three animal types.
+// Despite the filename, this file handles all three — dairy animals, layer flocks,
+// and meat bird batches each get their own create function because their schemas
+// (and therefore the input shape) are different.
+// Read-side queries for these tables live in queries/flocks.ts (also misnamed, but
+// it holds the shared "list everything for a user" fetches).
+
 import { supabase } from '../supabase';
 
+// What the rest of the app calls each animal category. Matches the type-counting
+// rules in the subscription tier limits (1 type free, 3 on homestead, ∞ on full_farm).
 export type AnimalType = 'dairy' | 'layers' | 'meat_birds';
 
+// Create a dairy animal (cow, in v1). Freshening date = the date she calved and
+// started lactating. Stored on the animal so we can compute Days In Milk (DIM).
 export async function createDairyAnimal(userId: string, data: {
   name: string;
   breed: string;
@@ -23,6 +34,9 @@ export async function createDairyAnimal(userId: string, data: {
   return animal;
 }
 
+// Create a layer-hen flock. hen_count is "how many laying hens are in this group" —
+// used as the denominator when calculating lay rate %. Intake date is when this cohort
+// arrived or hatched (used for cohort-level history).
 export async function createFlock(userId: string, data: {
   name: string;
   henCount: number;
@@ -44,6 +58,9 @@ export async function createFlock(userId: string, data: {
   return flock;
 }
 
+// Create a meat bird batch (Cornish Cross typically). chick_count is the starting
+// count — current flock size is derived as chick_count - sum(meat_bird_mortality.count).
+// Intake date drives "day of batch" calculations for weight samples and processing.
 export async function createMeatBirdBatch(userId: string, data: {
   breed: string;
   chickCount: number;

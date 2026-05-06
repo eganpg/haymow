@@ -1,11 +1,24 @@
+// Feed entry queries — direct reads/writes against the feed_entries table.
+// This is the lower-level companion to feedInventory.ts: where feedInventory.ts
+// handles the "stock + cost" lifecycle, this file handles the raw entry rows
+// (the audit log of what was fed, when, and to whom).
+
 import { supabase } from '../supabase';
 
+// Feed type vocabularies, scoped per animal type. The DB column is just `text`,
+// but these unions document what values the app actually uses on each side so
+// queries (and the upcoming feed→yield correlation) can filter consistently.
 export type DairyFeedType = 'grain' | 'hay' | 'mineral' | 'pasture' | 'other';
 export type LayerFeedType = 'layer-pellet' | 'scratch' | 'oyster-shell' | 'other';
 export type MeatBirdFeedType = 'chick-starter' | 'grower' | 'finisher' | 'other';
 
+// Units a feed amount can be expressed in. 'hours' is for pasture grazing.
 export type FeedUnit = 'lbs' | 'flakes' | 'hours' | 'bags' | 'oz';
 
+// Manually log a feed entry without going through the inventory system.
+// Most feed logging happens via logFeedUsage() in feedInventory.ts (which deducts
+// stock); this function is for free-form entries that don't draw from inventory —
+// e.g. pasture hours where there's no "stock" to deduct.
 export async function logFeedEntry(params: {
   userId: string;
   animalId?: string;
@@ -38,11 +51,19 @@ export async function logFeedEntry(params: {
   return data;
 }
 
+// One day's grain total, in lbs. Used by the Trends screen's feed-overlay chart.
+// We deliberately only track grain-in-lbs here (not hay, not pasture hours) because
+// summing across mixed units is meaningless and grain is what most directly
+// correlates with milk yield.
 export type DailyFeedTotal = {
   date: string;       // YYYY-MM-DD, local time
   grainLbs: number;   // sum of grain entries logged in lbs that day
 };
 
+// Build a YYYY-MM-DD key from a Date in the user's local timezone.
+// We don't use toISOString() because that forces UTC, which would put a feed entry
+// logged at 11pm local time into the next day's bucket. Local-time bucketing
+// matches how the user thinks about days.
 function localDateKey(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -50,6 +71,10 @@ function localDateKey(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+// Daily grain totals (in lbs) for an animal over the last `days` days.
+// Returns one entry per day in the window, including zeros for days with no feed
+// logged — that way the Trends chart can render a complete timeline without gaps.
+// Filters strictly to feed_type='grain' AND unit='lbs' so the sum is meaningful.
 export async function getDailyGrainLbs(animalId: string, days: number): Promise<DailyFeedTotal[]> {
   const start = new Date();
   start.setHours(0, 0, 0, 0);
@@ -80,6 +105,8 @@ export async function getDailyGrainLbs(animalId: string, days: number): Promise<
   return Array.from(buckets, ([date, grainLbs]) => ({ date, grainLbs }));
 }
 
+// Recent raw feed entries for an animal or flock. Returns full rows (not aggregated).
+// Used by profile screens to show "what did I feed lately" lists. Defaults to 7 days.
 export async function getRecentFeedEntries(params: {
   animalId?: string;
   flockId?: string;
