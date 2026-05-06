@@ -1,7 +1,9 @@
-// Egg collection queries — daily egg counts logged against a flock.
-// One row per (flock, collection_date) — there's a unique constraint at the DB level,
-// so re-logging for the same day overwrites rather than duplicates (handled at the
-// app layer by checking getTodaysCollection first).
+// Egg collection queries.
+// Each row in egg_collections represents ONE collection event — a single trip to
+// the coop. A single day can have multiple events (morning + afternoon trips),
+// and today's total is computed by summing them in getTodaysEggSummary().
+// This matches how Pete actually collects eggs and preserves per-trip history
+// (rather than collapsing the day into one mutable row).
 
 import { supabase } from '../supabase';
 
@@ -15,28 +17,44 @@ export type EggCollection = {
   notes: string | null;
 };
 
-// Today's egg log for a given flock, or null if nothing's been logged yet.
-// Used by the Today screen to show the daily count and decide whether to render
-// "Log egg collection" vs. "Update today's count".
-// `today` is a YYYY-MM-DD date — derived from UTC ISO string. This means a log
-// made just before midnight local time may bucket into the next UTC day; acceptable
-// trade-off for v1 since the user only sees their own data.
-export async function getTodaysCollection(flockId: string): Promise<EggCollection | null> {
+// Aggregated view of "what got collected today" for a flock.
+// totalCount sums every collection row from today; hasAny lets the UI decide
+// between "Log first collection" and "Log more" copy.
+export type EggDailySummary = {
+  totalCount: number;
+  brokenCount: number;
+  softShellCount: number;
+  hasAny: boolean;
+};
+
+// Today's running totals for a flock — sums every collection row for the day.
+// Used by the Today screen's LayerCard.
+// `today` is a YYYY-MM-DD string from a UTC ISO conversion. A log made just
+// before midnight local time may bucket into the next UTC day; acceptable for v1.
+export async function getTodaysEggSummary(flockId: string): Promise<EggDailySummary> {
   const today = new Date().toISOString().split('T')[0];
 
   const { data, error } = await supabase
     .from('egg_collections')
-    .select('*')
+    .select('egg_count, broken_count, soft_shell_count')
     .eq('flock_id', flockId)
-    .eq('collection_date', today)
-    .maybeSingle();
+    .eq('collection_date', today);
 
   if (error) throw error;
-  return data;
+
+  const rows = data ?? [];
+  return {
+    totalCount: rows.reduce((s, r) => s + (r.egg_count ?? 0), 0),
+    brokenCount: rows.reduce((s, r) => s + (r.broken_count ?? 0), 0),
+    softShellCount: rows.reduce((s, r) => s + (r.soft_shell_count ?? 0), 0),
+    hasAny: rows.length > 0,
+  };
 }
 
-// Insert today's egg collection. Optional fields default to 0/null — the only
-// truly required input is the egg count.
+// Log a single collection event. Each call inserts a new row — multiple calls
+// for the same flock on the same day are intentional (they represent separate
+// trips to the coop) and add to the daily total via getTodaysEggSummary.
+// Optional fields default to 0/null — the only required input is egg count.
 export async function logEggCollection(params: {
   flockId: string;
   userId: string;

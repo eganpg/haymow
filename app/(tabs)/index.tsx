@@ -8,7 +8,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
 import { getTodaysSessions, yieldInUnit, getDIM, MilkingSession } from '@/lib/queries/milking';
-import { getTodaysCollection, getLayRate, EggCollection } from '@/lib/queries/eggs';
+import { getTodaysEggSummary, getLayRate, EggDailySummary } from '@/lib/queries/eggs';
 import { useYieldUnit } from '@/lib/preferences';
 
 type Animal = {
@@ -33,7 +33,7 @@ type DairyCard = {
 
 type LayerCard = {
   flock: Flock;
-  collection: EggCollection | null;
+  summary: EggDailySummary;
 };
 
 export default function TodayScreen() {
@@ -47,6 +47,7 @@ export default function TodayScreen() {
 
   async function loadData() {
     const { data: { user } } = await supabase.auth.getUser();
+    console.log('[Today] auth user:', user?.id ?? '(none)');
     if (!user) return;
     setUserId(user.id);
 
@@ -54,6 +55,17 @@ export default function TodayScreen() {
       supabase.from('animals').select('*').eq('user_id', user.id),
       supabase.from('flocks').select('*').eq('user_id', user.id).eq('status', 'active'),
     ]);
+
+    console.log('[Today] animals query →', {
+      count: animalsRes.data?.length ?? 0,
+      error: animalsRes.error,
+      rows: animalsRes.data,
+    });
+    console.log('[Today] flocks (active) query →', {
+      count: flocksRes.data?.length ?? 0,
+      error: flocksRes.error,
+      rows: flocksRes.data,
+    });
 
     const animals: Animal[] = animalsRes.data ?? [];
     const flocks: Flock[] = flocksRes.data ?? [];
@@ -68,9 +80,11 @@ export default function TodayScreen() {
     const layerCards = await Promise.all(
       flocks.map(async (flock) => ({
         flock,
-        collection: await getTodaysCollection(flock.id),
+        summary: await getTodaysEggSummary(flock.id),
       }))
     );
+
+    console.log('[Today] cards built → dairy:', dairyCards.length, 'layers:', layerCards.length);
 
     setDairy(dairyCards);
     setLayers(layerCards);
@@ -79,6 +93,10 @@ export default function TodayScreen() {
   async function fetchAll() {
     try {
       await loadData();
+    } catch (err) {
+      // Without this catch the error becomes a swallowed promise rejection — we'd
+      // never see why the screen ended up empty.
+      console.error('[Today] loadData failed:', err);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -123,11 +141,11 @@ export default function TodayScreen() {
           />
         ))}
 
-        {layers.map(({ flock, collection }) => (
+        {layers.map(({ flock, summary }) => (
           <LayerCard
             key={flock.id}
             flock={flock}
-            collection={collection}
+            summary={summary}
             onLog={() => router.push({ pathname: '/log-eggs', params: { flockId: flock.id, flockName: flock.name } })}
           />
         ))}
@@ -187,12 +205,12 @@ function DairyCard({ animal, sessions, unit, onLog }: {
   );
 }
 
-function LayerCard({ flock, collection, onLog }: {
+function LayerCard({ flock, summary, onLog }: {
   flock: Flock;
-  collection: EggCollection | null;
+  summary: EggDailySummary;
   onLog: () => void;
 }) {
-  const layRate = collection ? getLayRate(collection.egg_count, flock.hen_count) : null;
+  const layRate = summary.hasAny ? getLayRate(summary.totalCount, flock.hen_count) : null;
 
   return (
     <View style={styles.card}>
@@ -206,7 +224,7 @@ function LayerCard({ flock, collection, onLog }: {
 
       <View style={styles.metric}>
         <Text style={styles.metricValue}>
-          {collection ? collection.egg_count : '—'}
+          {summary.hasAny ? summary.totalCount : '—'}
         </Text>
         <Text style={styles.metricUnit}>
           eggs today{layRate !== null ? ` · ${layRate}% lay rate` : ''}
@@ -218,7 +236,7 @@ function LayerCard({ flock, collection, onLog }: {
         onPress={onLog}
       >
         <Text style={styles.logButtonText}>
-          {collection ? 'Update today\'s count' : 'Log egg collection'}
+          {summary.hasAny ? 'Log more' : 'Log egg collection'}
         </Text>
       </Pressable>
     </View>
