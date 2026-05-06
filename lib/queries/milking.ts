@@ -180,6 +180,49 @@ export async function getRecentSessions(animalId: string, days = 7): Promise<Mil
   return data ?? [];
 }
 
+export type DailyYield = {
+  date: string;       // YYYY-MM-DD, local time
+  totalLbs: number;
+  sessionCount: number;
+};
+
+function localDateKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+export async function getDailyYields(animalId: string, days: number): Promise<DailyYield[]> {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - (days - 1));
+
+  const { data, error } = await supabase
+    .from('milking_sessions')
+    .select('session_time, yield_lbs')
+    .eq('animal_id', animalId)
+    .gte('session_time', start.toISOString())
+    .order('session_time', { ascending: true });
+  if (error) throw error;
+
+  const buckets = new Map<string, { totalLbs: number; sessionCount: number }>();
+  for (let i = 0; i < days; i++) {
+    const d = new Date(start);
+    d.setDate(d.getDate() + i);
+    buckets.set(localDateKey(d), { totalLbs: 0, sessionCount: 0 });
+  }
+  for (const row of data ?? []) {
+    const key = localDateKey(new Date(row.session_time));
+    const bucket = buckets.get(key);
+    if (bucket) {
+      bucket.totalLbs += Number(row.yield_lbs ?? 0);
+      bucket.sessionCount += 1;
+    }
+  }
+  return Array.from(buckets, ([date, b]) => ({ date, ...b }));
+}
+
 export function getDIM(fresheningDate: string): number {
   const freshening = new Date(fresheningDate);
   const today = new Date();

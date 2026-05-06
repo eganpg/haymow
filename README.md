@@ -369,9 +369,9 @@ Existing tools and why they don't serve this user:
 - Animals screen (list by type, animal profile, flock profile, add animal)
 - Settings screen (account, preferences, sign out)
 - Feed inventory system (stock tracking, restock, cost-per-unit, usage deduction)
+- Trends screen (7/30/90-day yield chart with grain feed overlay)
 
 **In progress / next up:**
-- Trends screen (7/30/90-day production chart)
 - Lactation curve view
 - Feed-to-yield correlation
 - Egg trends / cost per dozen

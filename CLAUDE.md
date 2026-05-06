@@ -26,6 +26,12 @@ Two core insights that make this different from everything on the market:
 
 ---
 
+## Keeping Docs in Sync
+
+When a checklist item gets completed, an architecture decision is made, or a screen ships, update both `CLAUDE.md` and `README.md` before ending the session — these docs are how future-you stays oriented.
+
+---
+
 ## The Primary User
 
 Pete, a homesteader in Lampasas County, Texas with:
@@ -818,7 +824,7 @@ Full list of every screen in the app. Claude Code will build these in order. **P
 
 **Main App — Mobile (Tab Bar)**
 - [x] Today — dairy card + egg card, daily totals, AM/PM session status, log buttons
-- [ ] Trends — 7/30/90-day chart, feed overlay toggle ← next up
+- [x] Trends — 7/30/90-day yield bar chart, grain feed overlay toggle, animal selector when >1
 - [x] Animals — list by type, animal/flock/batch profile, add animal/flock/batch
 - [x] Settings — account info, yield unit toggle, feed inventory link, subscription tier, sign out
 

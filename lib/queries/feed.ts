@@ -38,6 +38,48 @@ export async function logFeedEntry(params: {
   return data;
 }
 
+export type DailyFeedTotal = {
+  date: string;       // YYYY-MM-DD, local time
+  grainLbs: number;   // sum of grain entries logged in lbs that day
+};
+
+function localDateKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+export async function getDailyGrainLbs(animalId: string, days: number): Promise<DailyFeedTotal[]> {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - (days - 1));
+
+  const { data, error } = await supabase
+    .from('feed_entries')
+    .select('entry_time, feed_type, amount, unit')
+    .eq('animal_id', animalId)
+    .eq('feed_type', 'grain')
+    .eq('unit', 'lbs')
+    .gte('entry_time', start.toISOString())
+    .order('entry_time', { ascending: true });
+  if (error) throw error;
+
+  const buckets = new Map<string, number>();
+  for (let i = 0; i < days; i++) {
+    const d = new Date(start);
+    d.setDate(d.getDate() + i);
+    buckets.set(localDateKey(d), 0);
+  }
+  for (const row of data ?? []) {
+    const key = localDateKey(new Date(row.entry_time));
+    if (buckets.has(key)) {
+      buckets.set(key, buckets.get(key)! + Number(row.amount ?? 0));
+    }
+  }
+  return Array.from(buckets, ([date, grainLbs]) => ({ date, grainLbs }));
+}
+
 export async function getRecentFeedEntries(params: {
   animalId?: string;
   flockId?: string;
