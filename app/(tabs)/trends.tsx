@@ -4,6 +4,7 @@ import {
 } from 'react-native';
 import { useCallback, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
+import { useRouter } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
 import {
@@ -46,6 +47,7 @@ function localDateKey(d: Date): string {
 
 export default function TrendsScreen() {
   const unit = useYieldUnit();
+  const router = useRouter();
   const [animals, setAnimals] = useState<Animal[]>([]);
   const [animalId, setAnimalId] = useState<string | null>(null);
   const [range, setRange] = useState<Range>(7);
@@ -214,6 +216,20 @@ export default function TrendsScreen() {
             sessions={sessions.filter(s => localDateKey(new Date(s.session_time)) === selectedDate)}
             feedEntries={feedEntries.filter(e => localDateKey(new Date(e.entry_time)) === selectedDate)}
             onClose={() => setSelectedDate(null)}
+            onSessionPress={sessionId => {
+              // Reuse the existing edit flow — log-milking is dual-purpose
+              // (new session or edit if sessionId is provided). The selected
+              // animal name is needed for the screen header.
+              const currentAnimal = animals.find(a => a.id === animalId);
+              router.push({
+                pathname: '/log-milking',
+                params: {
+                  animalId: animalId ?? '',
+                  animalName: currentAnimal?.name ?? '',
+                  sessionId,
+                },
+              });
+            }}
           />
         )}
 
@@ -345,13 +361,16 @@ function FeedChart({
 // a session link (pasture hours, ad-hoc grazing entries) falls into a separate
 // "Other feed" section so it stays visible even though it isn't paired.
 function DayDetailCard({
-  date, unit, sessions, feedEntries, onClose,
+  date, unit, sessions, feedEntries, onClose, onSessionPress,
 }: {
   date: string;
   unit: 'gal' | 'lbs';
   sessions: MilkingSession[];
   feedEntries: FeedEntry[];
   onClose: () => void;
+  // Fired when the user taps a session block. The screen routes to the
+  // log-milking edit screen with this id — same flow as the animal profile.
+  onSessionPress: (sessionId: string) => void;
 }) {
   const unitLabel = unit === 'lbs' ? 'lbs' : 'gal';
   const totalLbs = sessions.reduce((s, r) => s + Number(r.yield_lbs ?? 0), 0);
@@ -394,6 +413,7 @@ function DayDetailCard({
               session={s}
               unit={unit}
               feed={feedBySession.get(s.id) ?? []}
+              onPress={() => onSessionPress(s.id)}
             />
           ))}
         </View>
@@ -415,13 +435,16 @@ function DayDetailCard({
 
 // Single session + its associated feed entries inline. The feed list sits
 // indented beneath the session header so the visual hierarchy reads as
-// "this session, and what she ate for it."
+// "this session, and what she ate for it." The whole block is Pressable —
+// tapping opens the edit screen for that session, which is the path the
+// user takes to fix or delete a stray record they spotted on the chart.
 function SessionBlock({
-  session, unit, feed,
+  session, unit, feed, onPress,
 }: {
   session: MilkingSession;
   unit: 'gal' | 'lbs';
   feed: FeedEntry[];
+  onPress: () => void;
 }) {
   const value = yieldInUnit(Number(session.yield_lbs ?? 0), unit).toFixed(1);
   const unitLabel = unit === 'lbs' ? 'lbs' : 'gal';
@@ -430,14 +453,22 @@ function SessionBlock({
   });
   const tags = session.health_tags ?? [];
   return (
-    <View style={styles.sessionBlock}>
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.sessionBlock, pressed && styles.sessionBlockPressed]}
+    >
       <View style={styles.sessionRow}>
         <View style={styles.sessionRowMain}>
           <Text style={styles.sessionType}>{session.session_type}</Text>
           <Text style={styles.sessionTime}>{time}</Text>
         </View>
         <View style={styles.sessionRowRight}>
-          <Text style={styles.sessionYield}>{value} {unitLabel}</Text>
+          <View style={styles.sessionYieldRow}>
+            <Text style={styles.sessionYield}>{value} {unitLabel}</Text>
+            {/* Chevron mirrors the affordance on the animal-profile session
+                rows, so the tap target reads as "open this." */}
+            <Text style={styles.sessionChevron}>›</Text>
+          </View>
           {(tags.length > 0 || session.notes) && (
             <Text style={styles.sessionMeta} numberOfLines={1}>
               {[...tags, session.notes].filter(Boolean).join(' · ')}
@@ -452,7 +483,7 @@ function SessionBlock({
           ))}
         </View>
       )}
-    </View>
+    </Pressable>
   );
 }
 
@@ -621,7 +652,14 @@ const styles = StyleSheet.create({
   detailRowValue: { fontSize: 14, fontWeight: '700', color: Colors.charcoal },
 
   sessionBlockList: { gap: 14 },
-  sessionBlock: { gap: 6 },
+  sessionBlock: {
+    gap: 6,
+    // Small horizontal pad so the pressed-state highlight has room to breathe
+    // without making the block feel like a separate card.
+    paddingHorizontal: 6, paddingVertical: 4, marginHorizontal: -6,
+    borderRadius: 8,
+  },
+  sessionBlockPressed: { backgroundColor: Colors.linen },
   sessionFeedList: {
     gap: 2, paddingLeft: 12, marginLeft: 4,
     borderLeftWidth: 2, borderLeftColor: Colors.border,
@@ -653,6 +691,11 @@ const styles = StyleSheet.create({
     minWidth: 28, textAlign: 'center',
   },
   sessionTime: { fontSize: 13, color: Colors.charcoal, opacity: 0.55 },
+  sessionYieldRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   sessionYield: { fontSize: 15, fontWeight: '800', color: Colors.charcoal },
+  sessionChevron: {
+    fontSize: 20, color: Colors.charcoal, opacity: 0.3, fontWeight: '600',
+    lineHeight: 20,
+  },
   sessionMeta: { fontSize: 11, color: Colors.charcoal, opacity: 0.5, marginTop: 2 },
 });
