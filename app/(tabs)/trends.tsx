@@ -19,6 +19,8 @@ type Range = 7 | 30 | 90;
 // and the table is polymorphic so its TS type is broader than what we render.
 // milking_session_id is the link added in migration 003; it lets the detail card
 // group each session's feed inline underneath the session row.
+// feed_inventory is the relational pull from getRecentFeedEntries — `name` is
+// the specific product (e.g. "Purina Layena"); null for free-form entries.
 type FeedEntry = {
   id: string;
   entry_time: string;
@@ -26,6 +28,7 @@ type FeedEntry = {
   amount: number | null;
   unit: string | null;
   milking_session_id: string | null;
+  feed_inventory: { name: string } | null;
 };
 
 const RANGES: Range[] = [7, 30, 90];
@@ -453,15 +456,29 @@ function SessionBlock({
   );
 }
 
-// One feed entry as a label/value row. `indented` is used when the row is
-// nested under a session — it dims the text and adds a left rule so the
-// hierarchy reads clearly.
+// One feed entry as a label/value row. When the entry is linked to an inventory
+// item, the product name is the primary label and the category (grain/hay/etc.)
+// renders as a small caption beneath it — keeps the row visually tight while
+// still surfacing both pieces of info. Entries without an inventory link
+// (free-form/pasture) fall back to category-only.
+// `indented` is used when the row is nested under a session.
 function FeedLine({ entry, indented }: { entry: FeedEntry; indented?: boolean }) {
+  const name = entry.feed_inventory?.name ?? null;
+  const category = entry.feed_type ?? 'feed';
+  // If there's no product name, treat the category as the primary label (no
+  // caption underneath). With a name, show name on top + category caption.
+  const primary = name ?? category;
+  const caption = name ? category : null;
   return (
     <View style={[styles.detailRow, indented && styles.feedLineIndented]}>
-      <Text style={[styles.detailRowLabel, indented && styles.feedLineLabelIndented]}>
-        {entry.feed_type ?? 'feed'}
-      </Text>
+      <View style={styles.feedLineTextCol}>
+        <Text style={[styles.detailRowLabel, indented && styles.feedLineLabelIndented]} numberOfLines={1}>
+          {primary}
+        </Text>
+        {caption && (
+          <Text style={styles.feedLineCaption}>{caption}</Text>
+        )}
+      </View>
       <Text style={[styles.detailRowValue, indented && styles.feedLineValueIndented]}>
         {Number(entry.amount ?? 0).toFixed(1)} {entry.unit ?? ''}
       </Text>
@@ -610,11 +627,18 @@ const styles = StyleSheet.create({
     borderLeftWidth: 2, borderLeftColor: Colors.border,
     paddingVertical: 4,
   },
-  feedLineIndented: { paddingVertical: 2 },
+  feedLineIndented: { paddingVertical: 2, alignItems: 'flex-start' },
+  feedLineTextCol: { flex: 1, paddingRight: 8 },
   feedLineLabelIndented: {
-    fontSize: 13, opacity: 0.7,
+    fontSize: 13, opacity: 0.85,
   },
   feedLineValueIndented: { fontSize: 13, fontWeight: '600' },
+  // The category caption sits under the product name. Small, dim, and not
+  // italicized so it reads as a label, not editorial.
+  feedLineCaption: {
+    fontSize: 11, color: Colors.charcoal, opacity: 0.45, fontWeight: '500',
+    textTransform: 'capitalize', marginTop: 1,
+  },
 
   sessionRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',

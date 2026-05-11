@@ -107,6 +107,12 @@ export async function getDailyGrainLbs(animalId: string, days: number): Promise<
 
 // Recent raw feed entries for an animal or flock. Returns full rows (not aggregated).
 // Used by profile screens to show "what did I feed lately" lists. Defaults to 7 days.
+//
+// Joins through to feed_inventory to pull the inventory item's name (e.g.
+// "Purina Layena") so the UI can show the specific product alongside the
+// generic category. Entries without a linked inventory row (free-form logs,
+// pasture hours) come back with feed_inventory = null; callers should fall
+// back to feed_type in that case.
 export async function getRecentFeedEntries(params: {
   animalId?: string;
   flockId?: string;
@@ -117,7 +123,7 @@ export async function getRecentFeedEntries(params: {
 
   let query = supabase
     .from('feed_entries')
-    .select('*')
+    .select('*, feed_inventory:feed_inventory_id(name)')
     .gte('entry_time', cutoff.toISOString())
     .order('entry_time', { ascending: false });
 
