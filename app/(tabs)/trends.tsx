@@ -17,12 +17,15 @@ type Range = 7 | 30 | 90;
 
 // Loose shape for raw feed_entries rows — we only need a handful of fields here,
 // and the table is polymorphic so its TS type is broader than what we render.
+// milking_session_id is the link added in migration 003; it lets the detail card
+// group each session's feed inline underneath the session row.
 type FeedEntry = {
   id: string;
   entry_time: string;
   feed_type: string | null;
   amount: number | null;
   unit: string | null;
+  milking_session_id: string | null;
 };
 
 const RANGES: Range[] = [7, 30, 90];
@@ -333,10 +336,11 @@ function FeedChart({
   );
 }
 
-// Detail panel for a tapped day. Renders the sessions logged on that date
-// (AM / PM / single) and the feed entries that share the date. Both lists
-// have explicit empty states because tapping a no-data bar is a valid action
-// (the user is asking "did I log anything that day?").
+// Detail panel for a tapped day. Sessions are rendered as blocks: each block
+// shows the session header (AM/PM, time, yield, notes) and inline beneath it
+// the feed entries linked to that session via milking_session_id. Feed without
+// a session link (pasture hours, ad-hoc grazing entries) falls into a separate
+// "Other feed" section so it stays visible even though it isn't paired.
 function DayDetailCard({
   date, unit, sessions, feedEntries, onClose,
 }: {
@@ -349,6 +353,20 @@ function DayDetailCard({
   const unitLabel = unit === 'lbs' ? 'lbs' : 'gal';
   const totalLbs = sessions.reduce((s, r) => s + Number(r.yield_lbs ?? 0), 0);
   const totalDisplay = yieldInUnit(totalLbs, unit);
+
+  // Bucket feed entries by their linked session id. The map key is the
+  // session id; orphans (no milking_session_id) accumulate under the
+  // ORPHAN_KEY sentinel so we can render them separately at the bottom.
+  const ORPHAN_KEY = '__orphan__';
+  const feedBySession = new Map<string, FeedEntry[]>();
+  for (const e of feedEntries) {
+    const key = e.milking_session_id ?? ORPHAN_KEY;
+    const arr = feedBySession.get(key) ?? [];
+    arr.push(e);
+    feedBySession.set(key, arr);
+  }
+  const orphanFeed = feedBySession.get(ORPHAN_KEY) ?? [];
+
   return (
     <View style={styles.detailCard}>
       <View style={styles.detailHeader}>
@@ -366,33 +384,42 @@ function DayDetailCard({
       {sessions.length === 0 ? (
         <Text style={styles.detailEmpty}>No sessions logged.</Text>
       ) : (
-        <View style={styles.detailList}>
+        <View style={styles.sessionBlockList}>
           {sessions.map(s => (
-            <SessionRow key={s.id} session={s} unit={unit} />
+            <SessionBlock
+              key={s.id}
+              session={s}
+              unit={unit}
+              feed={feedBySession.get(s.id) ?? []}
+            />
           ))}
         </View>
       )}
 
-      <Text style={styles.detailSectionLabel}>Feed</Text>
-      {feedEntries.length === 0 ? (
-        <Text style={styles.detailEmpty}>No feed logged.</Text>
-      ) : (
-        <View style={styles.detailList}>
-          {feedEntries.map(e => (
-            <View key={e.id} style={styles.detailRow}>
-              <Text style={styles.detailRowLabel}>{e.feed_type ?? 'feed'}</Text>
-              <Text style={styles.detailRowValue}>
-                {Number(e.amount ?? 0).toFixed(1)} {e.unit ?? ''}
-              </Text>
-            </View>
-          ))}
-        </View>
+      {orphanFeed.length > 0 && (
+        <>
+          <Text style={styles.detailSectionLabel}>Other feed</Text>
+          <View style={styles.detailList}>
+            {orphanFeed.map(e => (
+              <FeedLine key={e.id} entry={e} />
+            ))}
+          </View>
+        </>
       )}
     </View>
   );
 }
 
-function SessionRow({ session, unit }: { session: MilkingSession; unit: 'gal' | 'lbs' }) {
+// Single session + its associated feed entries inline. The feed list sits
+// indented beneath the session header so the visual hierarchy reads as
+// "this session, and what she ate for it."
+function SessionBlock({
+  session, unit, feed,
+}: {
+  session: MilkingSession;
+  unit: 'gal' | 'lbs';
+  feed: FeedEntry[];
+}) {
   const value = yieldInUnit(Number(session.yield_lbs ?? 0), unit).toFixed(1);
   const unitLabel = unit === 'lbs' ? 'lbs' : 'gal';
   const time = new Date(session.session_time).toLocaleTimeString('en-US', {
@@ -400,19 +427,44 @@ function SessionRow({ session, unit }: { session: MilkingSession; unit: 'gal' | 
   });
   const tags = session.health_tags ?? [];
   return (
-    <View style={styles.sessionRow}>
-      <View style={styles.sessionRowMain}>
-        <Text style={styles.sessionType}>{session.session_type}</Text>
-        <Text style={styles.sessionTime}>{time}</Text>
+    <View style={styles.sessionBlock}>
+      <View style={styles.sessionRow}>
+        <View style={styles.sessionRowMain}>
+          <Text style={styles.sessionType}>{session.session_type}</Text>
+          <Text style={styles.sessionTime}>{time}</Text>
+        </View>
+        <View style={styles.sessionRowRight}>
+          <Text style={styles.sessionYield}>{value} {unitLabel}</Text>
+          {(tags.length > 0 || session.notes) && (
+            <Text style={styles.sessionMeta} numberOfLines={1}>
+              {[...tags, session.notes].filter(Boolean).join(' · ')}
+            </Text>
+          )}
+        </View>
       </View>
-      <View style={styles.sessionRowRight}>
-        <Text style={styles.sessionYield}>{value} {unitLabel}</Text>
-        {(tags.length > 0 || session.notes) && (
-          <Text style={styles.sessionMeta} numberOfLines={1}>
-            {[...tags, session.notes].filter(Boolean).join(' · ')}
-          </Text>
-        )}
-      </View>
+      {feed.length > 0 && (
+        <View style={styles.sessionFeedList}>
+          {feed.map(e => (
+            <FeedLine key={e.id} entry={e} indented />
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
+// One feed entry as a label/value row. `indented` is used when the row is
+// nested under a session — it dims the text and adds a left rule so the
+// hierarchy reads clearly.
+function FeedLine({ entry, indented }: { entry: FeedEntry; indented?: boolean }) {
+  return (
+    <View style={[styles.detailRow, indented && styles.feedLineIndented]}>
+      <Text style={[styles.detailRowLabel, indented && styles.feedLineLabelIndented]}>
+        {entry.feed_type ?? 'feed'}
+      </Text>
+      <Text style={[styles.detailRowValue, indented && styles.feedLineValueIndented]}>
+        {Number(entry.amount ?? 0).toFixed(1)} {entry.unit ?? ''}
+      </Text>
     </View>
   );
 }
@@ -550,6 +602,19 @@ const styles = StyleSheet.create({
     textTransform: 'capitalize',
   },
   detailRowValue: { fontSize: 14, fontWeight: '700', color: Colors.charcoal },
+
+  sessionBlockList: { gap: 14 },
+  sessionBlock: { gap: 6 },
+  sessionFeedList: {
+    gap: 2, paddingLeft: 12, marginLeft: 4,
+    borderLeftWidth: 2, borderLeftColor: Colors.border,
+    paddingVertical: 4,
+  },
+  feedLineIndented: { paddingVertical: 2 },
+  feedLineLabelIndented: {
+    fontSize: 13, opacity: 0.7,
+  },
+  feedLineValueIndented: { fontSize: 13, fontWeight: '600' },
 
   sessionRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',

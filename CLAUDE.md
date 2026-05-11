@@ -824,7 +824,7 @@ Full list of every screen in the app. Claude Code will build these in order. **P
 
 **Main App — Mobile (Tab Bar)**
 - [x] Today — dairy card + egg card, daily totals, AM/PM session status, log buttons
-- [x] Trends — 7/30/90-day yield bar chart, grain feed overlay toggle, animal selector when >1
+- [x] Trends — 7/30/90-day yield bar chart, grain feed overlay toggle, animal selector when >1; tap a bar to drill into that day's sessions + the feed logged with each session
 - [x] Animals — list by type, animal/flock/batch profile, add animal/flock/batch
 - [x] Settings — account info, yield unit toggle, feed inventory link, subscription tier, sign out
 
@@ -871,4 +871,4 @@ Full list of every screen in the app. Claude Code will build these in order. **P
 
 ---
 
-*Last updated: 2026-04-12. App scaffold complete, core logging and feed inventory system built. See README.md for full project status.*
+*Last updated: 2026-05-11. App scaffold complete, core logging and feed inventory system built, Trends drill-down shipped. See README.md for full project status.*
