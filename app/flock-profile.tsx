@@ -40,12 +40,17 @@ export default function FlockProfileScreen() {
     return <View style={styles.centered}><Text>Flock not found.</Text></View>;
   }
 
+  // 7-day cutoff is compared as a YYYY-MM-DD string (lexicographic comparison
+  // works on that format). We deliberately don't do `new Date(c.collection_date)`
+  // here: parsing "2026-05-11" with Date() yields midnight UTC, which in CST/CDT
+  // is the previous evening, shifting the bucket back a day. Comparing the
+  // strings directly keeps everything in the user's local calendar.
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - 7);
+  const cutoffStr =
+    `${cutoffDate.getFullYear()}-${String(cutoffDate.getMonth() + 1).padStart(2, '0')}-${String(cutoffDate.getDate()).padStart(2, '0')}`;
   const sevenDayTotal = collections
-    .filter(c => {
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - 7);
-      return new Date(c.collection_date) >= cutoff;
-    })
+    .filter(c => c.collection_date >= cutoffStr)
     .reduce((sum, c) => sum + c.egg_count, 0);
 
   const avgLayRate = collections.length > 0
@@ -81,7 +86,7 @@ export default function FlockProfileScreen() {
             {collections.map(c => (
               <View key={c.id} style={styles.row}>
                 <Text style={styles.rowDate}>
-                  {new Date(c.collection_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  {formatCollectionDate(c.collection_date)}
                 </Text>
                 <View style={styles.rowRight}>
                   {(c.broken_count > 0 || c.soft_shell_count > 0) && (
@@ -108,6 +113,17 @@ export default function FlockProfileScreen() {
       </Pressable>
     </ScrollView>
   );
+}
+
+// Render a YYYY-MM-DD collection_date as "May 10" in the user's local calendar.
+// `new Date("2026-05-11")` parses as midnight UTC, which in Texas is 7pm on
+// May 10 — `.toLocaleDateString()` would then render "May 10" for a row the
+// user logged on May 11. Splitting the parts and passing them to the
+// (y, m, d) Date constructor builds a local midnight Date, which formats
+// correctly in any timezone.
+function formatCollectionDate(isoDate: string): string {
+  const [y, m, d] = isoDate.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 function StatCard({ label, value, hint }: { label: string; value: string; hint?: string }) {

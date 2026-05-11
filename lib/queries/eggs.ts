@@ -27,12 +27,26 @@ export type EggDailySummary = {
   hasAny: boolean;
 };
 
+// Build a YYYY-MM-DD key from a Date in the user's local timezone.
+// We don't use toISOString() because that forces UTC: a collection logged at
+// 7am local time in Texas (UTC-5) converts to noon UTC the same day — OK — but
+// a log at 11pm local converts to 4am UTC the *next* day, so the row would
+// land in tomorrow's bucket. Worse, on the read side `new Date("2026-05-11")`
+// parses as midnight UTC, which is the previous evening in local time, so a
+// `.toLocaleDateString()` of that value renders as the day before. Building
+// the key from local Date components avoids both halves of that bug.
+function localDateKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 // Today's running totals for a flock — sums every collection row for the day.
-// Used by the Today screen's LayerCard.
-// `today` is a YYYY-MM-DD string from a UTC ISO conversion. A log made just
-// before midnight local time may bucket into the next UTC day; acceptable for v1.
+// Used by the Today screen's LayerCard. `today` is the local calendar date,
+// matching how the user thinks about "today" while standing in the coop.
 export async function getTodaysEggSummary(flockId: string): Promise<EggDailySummary> {
-  const today = new Date().toISOString().split('T')[0];
+  const today = localDateKey(new Date());
 
   const { data, error } = await supabase
     .from('egg_collections')
@@ -63,7 +77,7 @@ export async function logEggCollection(params: {
   softShellCount?: number;
   notes?: string;
 }) {
-  const today = new Date().toISOString().split('T')[0];
+  const today = localDateKey(new Date());
 
   const { data, error } = await supabase
     .from('egg_collections')
