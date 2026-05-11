@@ -274,6 +274,27 @@ export async function getDailyYields(animalId: string, days: number): Promise<Da
   return Array.from(buckets, ([date, b]) => ({ date, ...b }));
 }
 
+// All sessions for an animal over the last `days` days, oldest first.
+// Used by the Trends screen's tap-a-bar detail panel — we want the raw rows
+// (with yields, session_type, notes, health tags) so we can group them by day
+// on the client and render a per-day breakdown without an extra query per tap.
+// Oldest-first ordering matches how the chart renders left-to-right; the screen
+// re-bucketizes by local date and within a day sessions render AM then PM.
+export async function getSessionsInRange(animalId: string, days: number): Promise<MilkingSession[]> {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - (days - 1));
+
+  const { data, error } = await supabase
+    .from('milking_sessions')
+    .select('*')
+    .eq('animal_id', animalId)
+    .gte('session_time', start.toISOString())
+    .order('session_time', { ascending: true });
+  if (error) throw error;
+  return data ?? [];
+}
+
 // Days In Milk — how many days a dairy cow has been lactating.
 // Calculated from her freshening (calving) date. Drives the lactation curve view
 // and shows up as "Day N" on her profile and the Today card. Pure math; no DB hit.

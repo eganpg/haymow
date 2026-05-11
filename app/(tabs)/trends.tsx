@@ -6,14 +6,37 @@ import { useCallback, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
-import { getDailyYields, yieldInUnit, DailyYield } from '@/lib/queries/milking';
-import { getDailyGrainLbs, DailyFeedTotal } from '@/lib/queries/feed';
+import {
+  getDailyYields, getSessionsInRange, yieldInUnit, DailyYield, MilkingSession,
+} from '@/lib/queries/milking';
+import { getDailyGrainLbs, getRecentFeedEntries, DailyFeedTotal } from '@/lib/queries/feed';
 import { useYieldUnit } from '@/lib/preferences';
 
 type Animal = { id: string; name: string; breed: string | null };
 type Range = 7 | 30 | 90;
 
+// Loose shape for raw feed_entries rows — we only need a handful of fields here,
+// and the table is polymorphic so its TS type is broader than what we render.
+type FeedEntry = {
+  id: string;
+  entry_time: string;
+  feed_type: string | null;
+  amount: number | null;
+  unit: string | null;
+};
+
 const RANGES: Range[] = [7, 30, 90];
+
+// YYYY-MM-DD key built from local Date components. Same rationale as the helpers
+// in milking.ts / feed.ts / eggs.ts: avoid UTC bucketing so a 10pm session in
+// CST doesn't slip into the next day. Inlined here because the trends screen
+// re-buckets raw session/feed rows by date when the user taps a bar.
+function localDateKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 
 export default function TrendsScreen() {
   const unit = useYieldUnit();
@@ -23,6 +46,17 @@ export default function TrendsScreen() {
   const [showFeed, setShowFeed] = useState(false);
   const [yields, setYields] = useState<DailyYield[]>([]);
   const [feed, setFeed] = useState<DailyFeedTotal[]>([]);
+  // Raw sessions and feed rows for the current range, kept in state so the detail
+  // panel can be rendered instantly on bar-tap without re-querying. The lists are
+  // small (≤ ~180 each for 90 days), so loading everything up-front is cheaper than
+  // a network round trip per tap.
+  const [sessions, setSessions] = useState<MilkingSession[]>([]);
+  const [feedEntries, setFeedEntries] = useState<FeedEntry[]>([]);
+  // The day the user has drilled into. null means no panel is shown; tapping the
+  // same bar again toggles it back to null. Reset whenever animal or range changes,
+  // since a selected date wouldn't necessarily map to a meaningful bar after the
+  // window shifts.
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -40,12 +74,20 @@ export default function TrendsScreen() {
   }
 
   async function loadData(id: string, r: Range) {
-    const [y, f] = await Promise.all([
+    // Four queries in parallel: two aggregated (chart data) and two raw
+    // (detail-panel data). Splitting them like this keeps the chart's daily
+    // bucketing logic in the queries layer while still giving the screen
+    // per-session and per-feed-entry rows for drill-down.
+    const [y, f, s, fe] = await Promise.all([
       getDailyYields(id, r),
       getDailyGrainLbs(id, r),
+      getSessionsInRange(id, r),
+      getRecentFeedEntries({ animalId: id, days: r }),
     ]);
     setYields(y);
     setFeed(f);
+    setSessions(s);
+    setFeedEntries(fe as FeedEntry[]);
   }
 
   async function refresh() {
@@ -101,14 +143,33 @@ export default function TrendsScreen() {
         {animals.length > 1 && (
           <View style={styles.pillRow}>
             {animals.map(a => (
-              <Pill key={a.id} label={a.name} active={a.id === animalId} onPress={() => setAnimalId(a.id)} />
+              <Pill
+                key={a.id}
+                label={a.name}
+                active={a.id === animalId}
+                onPress={() => {
+                  // Clearing the selected day on filter changes keeps the detail
+                  // panel from showing a date that no longer corresponds to the
+                  // visible chart (different animal, or off the new range).
+                  setSelectedDate(null);
+                  setAnimalId(a.id);
+                }}
+              />
             ))}
           </View>
         )}
 
         <View style={styles.pillRow}>
           {RANGES.map(r => (
-            <Pill key={r} label={`${r}d`} active={r === range} onPress={() => setRange(r)} />
+            <Pill
+              key={r}
+              label={`${r}d`}
+              active={r === range}
+              onPress={() => {
+                setSelectedDate(null);
+                setRange(r);
+              }}
+            />
           ))}
         </View>
 
@@ -125,13 +186,30 @@ export default function TrendsScreen() {
             </View>
           </View>
 
-          <BarChart data={yields} unit={unit} />
+          <BarChart
+            data={yields}
+            unit={unit}
+            selectedDate={selectedDate}
+            // Tap-the-same-bar-to-collapse is the lightweight way to dismiss the
+            // panel without adding a close button — feels natural on mobile.
+            onSelect={d => setSelectedDate(prev => (prev === d ? null : d))}
+          />
 
           <View style={styles.dateRow}>
             <Text style={styles.dateLabel}>{formatShort(yields[0]?.date)}</Text>
             <Text style={styles.dateLabel}>Today</Text>
           </View>
         </View>
+
+        {selectedDate && (
+          <DayDetailCard
+            date={selectedDate}
+            unit={unit}
+            sessions={sessions.filter(s => localDateKey(new Date(s.session_time)) === selectedDate)}
+            feedEntries={feedEntries.filter(e => localDateKey(new Date(e.entry_time)) === selectedDate)}
+            onClose={() => setSelectedDate(null)}
+          />
+        )}
 
         <Pressable
           onPress={() => setShowFeed(v => !v)}
@@ -146,7 +224,11 @@ export default function TrendsScreen() {
         {showFeed && (
           <View style={styles.card}>
             <Text style={styles.feedHeader}>Grain fed</Text>
-            <FeedChart data={feed} />
+            <FeedChart
+              data={feed}
+              selectedDate={selectedDate}
+              onSelect={d => setSelectedDate(prev => (prev === d ? null : d))}
+            />
             <View style={styles.dateRow}>
               <Text style={styles.dateLabel}>{formatShort(feed[0]?.date)}</Text>
               <Text style={styles.dateLabel}>Today</Text>
@@ -158,7 +240,18 @@ export default function TrendsScreen() {
   );
 }
 
-function BarChart({ data, unit }: { data: DailyYield[]; unit: 'gal' | 'lbs' }) {
+// Yield bar chart. Each bar is a Pressable so tapping drills into that day.
+// The selected bar swaps to Colors.moss (a darker sage) for a clear "you're
+// looking at this one" affordance — chosen over a border because borders mess
+// with the bar's height math at very small percentages.
+function BarChart({
+  data, unit, selectedDate, onSelect,
+}: {
+  data: DailyYield[];
+  unit: 'gal' | 'lbs';
+  selectedDate: string | null;
+  onSelect: (date: string) => void;
+}) {
   const values = data.map(d => yieldInUnit(d.totalLbs, unit));
   const max = Math.max(1, ...values);
   return (
@@ -167,25 +260,44 @@ function BarChart({ data, unit }: { data: DailyYield[]; unit: 'gal' | 'lbs' }) {
         const v = values[i];
         const heightPct = (v / max) * 100;
         const isEmpty = v === 0;
+        const isSelected = d.date === selectedDate;
+        // Empty days are still tappable — the detail panel will just show
+        // "No sessions logged", which is useful for confirming a missed day.
+        const fillColor = isSelected
+          ? Colors.moss
+          : isEmpty
+            ? Colors.border
+            : Colors.sage;
         return (
-          <View key={d.date} style={styles.barCell}>
+          <Pressable
+            key={d.date}
+            onPress={() => onSelect(d.date)}
+            style={styles.barCell}
+            hitSlop={4}
+          >
             <View
               style={[
                 styles.bar,
                 {
                   height: `${isEmpty ? 1 : heightPct}%`,
-                  backgroundColor: isEmpty ? Colors.border : Colors.sage,
+                  backgroundColor: fillColor,
                 },
               ]}
             />
-          </View>
+          </Pressable>
         );
       })}
     </View>
   );
 }
 
-function FeedChart({ data }: { data: DailyFeedTotal[] }) {
+function FeedChart({
+  data, selectedDate, onSelect,
+}: {
+  data: DailyFeedTotal[];
+  selectedDate: string | null;
+  onSelect: (date: string) => void;
+}) {
   const max = Math.max(1, ...data.map(d => d.grainLbs));
   return (
     <View style={styles.feedChart}>
@@ -193,20 +305,114 @@ function FeedChart({ data }: { data: DailyFeedTotal[] }) {
         const v = d.grainLbs;
         const heightPct = (v / max) * 100;
         const isEmpty = v === 0;
+        const isSelected = d.date === selectedDate;
+        // Selected uses charcoal so it stands out against the gold default —
+        // moss would clash with the gold palette of the feed chart.
+        const fillColor = isSelected
+          ? Colors.charcoal
+          : isEmpty
+            ? Colors.border
+            : Colors.gold;
         return (
-          <View key={d.date} style={styles.barCell}>
+          <Pressable
+            key={d.date}
+            onPress={() => onSelect(d.date)}
+            style={styles.barCell}
+            hitSlop={4}
+          >
             <View
               style={[
                 styles.bar,
-                {
-                  height: `${isEmpty ? 1 : heightPct}%`,
-                  backgroundColor: isEmpty ? Colors.border : Colors.gold,
-                },
+                { height: `${isEmpty ? 1 : heightPct}%`, backgroundColor: fillColor },
               ]}
             />
-          </View>
+          </Pressable>
         );
       })}
+    </View>
+  );
+}
+
+// Detail panel for a tapped day. Renders the sessions logged on that date
+// (AM / PM / single) and the feed entries that share the date. Both lists
+// have explicit empty states because tapping a no-data bar is a valid action
+// (the user is asking "did I log anything that day?").
+function DayDetailCard({
+  date, unit, sessions, feedEntries, onClose,
+}: {
+  date: string;
+  unit: 'gal' | 'lbs';
+  sessions: MilkingSession[];
+  feedEntries: FeedEntry[];
+  onClose: () => void;
+}) {
+  const unitLabel = unit === 'lbs' ? 'lbs' : 'gal';
+  const totalLbs = sessions.reduce((s, r) => s + Number(r.yield_lbs ?? 0), 0);
+  const totalDisplay = yieldInUnit(totalLbs, unit);
+  return (
+    <View style={styles.detailCard}>
+      <View style={styles.detailHeader}>
+        <Text style={styles.detailTitle}>{formatLongDate(date)}</Text>
+        <Pressable onPress={onClose} hitSlop={10}>
+          <Text style={styles.detailClose}>✕</Text>
+        </Pressable>
+      </View>
+
+      <Text style={styles.detailTotal}>
+        {totalDisplay.toFixed(1)} {unitLabel} · {sessions.length} session{sessions.length === 1 ? '' : 's'}
+      </Text>
+
+      <Text style={styles.detailSectionLabel}>Sessions</Text>
+      {sessions.length === 0 ? (
+        <Text style={styles.detailEmpty}>No sessions logged.</Text>
+      ) : (
+        <View style={styles.detailList}>
+          {sessions.map(s => (
+            <SessionRow key={s.id} session={s} unit={unit} />
+          ))}
+        </View>
+      )}
+
+      <Text style={styles.detailSectionLabel}>Feed</Text>
+      {feedEntries.length === 0 ? (
+        <Text style={styles.detailEmpty}>No feed logged.</Text>
+      ) : (
+        <View style={styles.detailList}>
+          {feedEntries.map(e => (
+            <View key={e.id} style={styles.detailRow}>
+              <Text style={styles.detailRowLabel}>{e.feed_type ?? 'feed'}</Text>
+              <Text style={styles.detailRowValue}>
+                {Number(e.amount ?? 0).toFixed(1)} {e.unit ?? ''}
+              </Text>
+            </View>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
+function SessionRow({ session, unit }: { session: MilkingSession; unit: 'gal' | 'lbs' }) {
+  const value = yieldInUnit(Number(session.yield_lbs ?? 0), unit).toFixed(1);
+  const unitLabel = unit === 'lbs' ? 'lbs' : 'gal';
+  const time = new Date(session.session_time).toLocaleTimeString('en-US', {
+    hour: 'numeric', minute: '2-digit',
+  });
+  const tags = session.health_tags ?? [];
+  return (
+    <View style={styles.sessionRow}>
+      <View style={styles.sessionRowMain}>
+        <Text style={styles.sessionType}>{session.session_type}</Text>
+        <Text style={styles.sessionTime}>{time}</Text>
+      </View>
+      <View style={styles.sessionRowRight}>
+        <Text style={styles.sessionYield}>{value} {unitLabel}</Text>
+        {(tags.length > 0 || session.notes) && (
+          <Text style={styles.sessionMeta} numberOfLines={1}>
+            {[...tags, session.notes].filter(Boolean).join(' · ')}
+          </Text>
+        )}
+      </View>
     </View>
   );
 }
@@ -230,6 +436,17 @@ function formatShort(date: string | undefined): string {
   if (!date) return '';
   const [, m, d] = date.split('-');
   return `${parseInt(m, 10)}/${parseInt(d, 10)}`;
+}
+
+// Long-form display for the detail header, e.g. "Sat, May 11".
+// Parses the YYYY-MM-DD parts into a *local* Date — passing the string into
+// new Date() would land at midnight UTC and shift back a day west of UTC
+// (same bug we just fixed in flock-profile).
+function formatLongDate(date: string): string {
+  const [y, m, d] = date.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric',
+  });
 }
 
 const styles = StyleSheet.create({
@@ -297,4 +514,56 @@ const styles = StyleSheet.create({
   toggleKnobOn: { transform: [{ translateX: 18 }] },
 
   feedHeader: { fontSize: 15, fontWeight: '700', color: Colors.charcoal },
+
+  detailCard: {
+    backgroundColor: Colors.cream, borderRadius: 16,
+    borderWidth: 1.5, borderColor: Colors.border,
+    padding: 20, gap: 10,
+  },
+  detailHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+  },
+  detailTitle: { fontSize: 18, fontWeight: '800', color: Colors.charcoal },
+  detailClose: {
+    fontSize: 18, color: Colors.charcoal, opacity: 0.5, fontWeight: '600',
+    paddingHorizontal: 4,
+  },
+  detailTotal: {
+    fontSize: 14, color: Colors.charcoal, opacity: 0.6, fontWeight: '600',
+    marginBottom: 4,
+  },
+  detailSectionLabel: {
+    fontSize: 11, fontWeight: '700', color: Colors.charcoal,
+    opacity: 0.4, textTransform: 'uppercase', letterSpacing: 0.8,
+    marginTop: 4,
+  },
+  detailEmpty: {
+    fontSize: 13, color: Colors.charcoal, opacity: 0.4, fontStyle: 'italic',
+  },
+  detailList: { gap: 8 },
+  detailRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingVertical: 4,
+  },
+  detailRowLabel: {
+    fontSize: 14, color: Colors.charcoal, fontWeight: '500',
+    textTransform: 'capitalize',
+  },
+  detailRowValue: { fontSize: 14, fontWeight: '700', color: Colors.charcoal },
+
+  sessionRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
+    paddingVertical: 6,
+  },
+  sessionRowMain: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
+  sessionRowRight: { alignItems: 'flex-end', maxWidth: '60%' },
+  sessionType: {
+    fontSize: 13, fontWeight: '800', color: Colors.sage,
+    backgroundColor: Colors.linen,
+    paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4,
+    minWidth: 28, textAlign: 'center',
+  },
+  sessionTime: { fontSize: 13, color: Colors.charcoal, opacity: 0.55 },
+  sessionYield: { fontSize: 15, fontWeight: '800', color: Colors.charcoal },
+  sessionMeta: { fontSize: 11, color: Colors.charcoal, opacity: 0.5, marginTop: 2 },
 });
