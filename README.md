@@ -209,7 +209,7 @@ WeatherLog (auto-fetched)
 | Web | Next.js (via Expo Web or standalone) | Shared component logic |
 | Backend | Supabase | Real-time DB, auth, REST API, storage |
 | SMS Parsing | Twilio + Claude API | Natural language log parsing |
-| Charts | Recharts | Correlation visualizations |
+| Charts | Hand-rolled RN Views today; richer chart lib (Recharts / Victory Native) when correlation views land | Trends bars don't need a chart lib; correlation scatter / lactation curve will |
 | Weather | Open-Meteo API | Free, no key required for basic use |
 | Auth | Supabase Auth | Email/password + magic link |
 
@@ -364,12 +364,13 @@ Existing tools and why they don't serve this user:
 - Google Sign In authentication
 - Onboarding flow (pick animal type → set up first animal → ready)
 - Today screen (dairy card + egg card, daily totals, AM/PM status)
-- Log milking session (yield, session type, multi-feed, health tags, notes)
-- Log egg collection (count, broken/soft shell, feed)
+- Log milking session (yield, session type, multi-feed, health tags, notes, editable session time)
+- Edit/delete milking session (deletion also reverts inventory deductions and removes linked feed entries)
+- Log egg collection — per-trip event log (multiple collections per day sum to a daily total)
 - Animals screen (list by type, animal profile, flock profile, add animal)
 - Settings screen (account, preferences, sign out)
-- Feed inventory system (stock tracking, restock, cost-per-unit, usage deduction)
-- Trends screen (7/30/90-day yield chart with grain feed overlay; tap any bar to see that day's sessions and the feed logged with each)
+- Feed inventory system (stock tracking, restock, cost-per-unit, usage deduction, by-package restock)
+- Trends screen — 7/30/90-day yield chart with grain feed overlay; tap any bar to drill into that day's sessions with the feed (by product name + category) logged inline under each; tap a session to edit or delete it
 
 **In progress / next up:**
 - Lactation curve view

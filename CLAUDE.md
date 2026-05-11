@@ -70,7 +70,7 @@ V1 is dairy-first. Items marked **(v1.x)** are scaffolded but parked until dairy
 | Backend / DB | **Supabase** | Postgres, real-time, auth, storage, REST |
 | SMS | **Twilio (post-v1)** | Not in initial build — added in a future release |
 | NLP Parsing | **Claude API** (claude-sonnet-4-20250514) | SMS parsing when that feature ships |
-| Charts | **Recharts** | Trend and correlation visualizations |
+| Charts | Hand-rolled RN Views (Trends bars); **Recharts** planned for correlation/lactation | RN-compatible primitives are enough for bar charts; richer visualizations may pull in Victory Native or similar when needed |
 | Weather | **Open-Meteo API** | Free, no API key required |
 | Auth | **Supabase Auth + Google OAuth** | Google Sign In only (no email/password in v1) |
 | Payments | **Stripe** | Subscription billing — deferred to v2, all users on free tier for now |
@@ -112,10 +112,10 @@ haymow/                      ← root project folder (also the app name, tradema
 │   │   └── ready.tsx        ← Done screen with first-log CTA
 │   ├── (tabs)/              ← Main tab navigation
 │   │   ├── index.tsx        ← Today screen (dairy card + egg card)
-│   │   ├── trends.tsx       ← Charts and analytics (placeholder)
+│   │   ├── trends.tsx       ← Yield/feed bar charts with tap-to-drill day detail
 │   │   ├── animals.tsx      ← Animal/flock/batch list + profiles
 │   │   └── settings.tsx     ← Account, preferences, feed inventory link
-│   ├── log-milking.tsx      ← Modal: log dairy session
+│   ├── log-milking.tsx      ← Modal: log/edit/delete dairy session (also handles linked feed)
 │   ├── log-eggs.tsx         ← Modal: log egg collection
 │   ├── add-animal.tsx       ← Modal: add animal/flock/batch
 │   ├── animal-profile.tsx   ← Dairy animal detail screen
@@ -129,16 +129,24 @@ haymow/                      ← root project folder (also the app name, tradema
 │   └── Colors.ts            ← Design tokens (sage, linen, rust, etc.)
 ├── lib/
 │   ├── supabase.ts          ← Supabase client (SecureStore + web localStorage adapter)
-│   ├── AppContext.tsx        ← Global auth state: 'loading'|'unauthenticated'|'onboarding'|'ready'
+│   ├── AppContext.tsx       ← Global auth state: 'loading'|'unauthenticated'|'onboarding'|'ready'
 │   ├── auth.ts              ← signInWithGoogle(), signOut()
+│   ├── preferences.ts       ← Yield unit preference (gal/lbs) via SecureStore + web fallback
 │   └── queries/
-│       ├── milking.ts       ← logMilkingSession(), getMilkingSessions()
-│       ├── eggs.ts          ← logEggCollection(), getEggCollections()
-│       └── feedInventory.ts ← getFeedInventory(), createFeedItem(), restockFeedItem(), logFeedUsage()
+│       ├── animals.ts       ← Dairy animal CRUD
+│       ├── eggs.ts          ← logEggCollection(), getTodaysEggSummary(), getLayRate()
+│       ├── feed.ts          ← logFeedEntry(), getDailyGrainLbs(), getRecentFeedEntries()
+│       ├── feedInventory.ts ← Inventory + restock + logFeedUsage() (deducts stock + links to session)
+│       ├── flocks.ts        ← Layer flock CRUD
+│       ├── milking.ts       ← log/update/deleteMilkingSession, getDailyYields, getSessionsInRange
+│       └── user.ts          ← User profile + onboarding state
 ├── supabase/
 │   └── migrations/
-│       ├── 001_initial_schema.sql  ← Core tables + RLS
-│       └── 002_feed_inventory.sql  ← feed_inventory, feed_purchases, feed_entries.feed_inventory_id
+│       ├── 001_initial_schema.sql           ← Core tables + RLS
+│       ├── 002_feed_inventory.sql           ← feed_inventory, feed_purchases, feed_entries.feed_inventory_id
+│       ├── 003_feed_session_link.sql        ← feed_entries.milking_session_id (ON DELETE SET NULL)
+│       ├── 004_egg_collections_unique.sql   ← (Reverted in 005) Per-day unique constraint
+│       └── 005_egg_collections_per_log.sql  ← Drops the unique constraint — eggs are now per-trip events
 ├── README.md
 └── CLAUDE.md
 ```
@@ -196,12 +204,17 @@ create table flocks (
 ```
 
 ### egg_collections
+Each row is a single collection event ("at 7am I collected 5"; "at 11am I
+collected 4 more"). Multiple rows per `(flock_id, collection_date)` is the
+intended shape — today's total is summed at read time in `getTodaysEggSummary()`.
+There is no unique constraint on `(flock_id, collection_date)` (migration 005
+dropped the one added in 004).
 ```sql
 create table egg_collections (
   id uuid primary key default gen_random_uuid(),
   flock_id uuid references flocks not null,
   user_id uuid references auth.users not null,
-  collection_date date not null,
+  collection_date date not null,         -- stored as local-calendar date (YYYY-MM-DD)
   egg_count integer not null,
   broken_count integer default 0,
   soft_shell_count integer default 0,
@@ -310,6 +323,8 @@ create table feed_entries (
   flock_id uuid references flocks,           -- nullable
   batch_id uuid references meat_bird_batches, -- nullable
   feed_inventory_id uuid references feed_inventory, -- nullable; links to inventory item
+  milking_session_id uuid references milking_sessions on delete set null,
+                                              -- added in migration 003; links dairy feed to its session
   -- exactly one of animal_id/flock_id/batch_id should be set
   entry_time timestamptz not null,
   feed_type text,
@@ -322,7 +337,12 @@ create table feed_entries (
   notes text,
   created_at timestamptz default now()
 );
--- NOTE: logFeedUsage() deducts amount from feed_inventory.quantity_on_hand automatically
+-- NOTES:
+--   logFeedUsage() deducts amount from feed_inventory.quantity_on_hand automatically.
+--   deleteMilkingSession() restores inventory + deletes linked feed_entries before
+--   deleting the session — we do this in app code, not via cascade, because the
+--   inventory restore must run first. ON DELETE SET NULL is the safety net.
+--   Pre-migration-003 rows have milking_session_id = NULL (no backfill).
 ```
 
 ### processing_entries (dairy milk processing)
