@@ -452,6 +452,10 @@ function SessionBlock({
     hour: 'numeric', minute: '2-digit',
   });
   const tags = session.health_tags ?? [];
+  const estimated = session.is_estimated;
+  // When estimated, italicize the yield AND prepend an "est." marker on the meta
+  // line. Two cheap visual signals reinforce that this isn't measured data.
+  const metaParts = [estimated ? 'est.' : null, ...tags, session.notes].filter(Boolean);
   return (
     <Pressable
       onPress={onPress}
@@ -464,14 +468,16 @@ function SessionBlock({
         </View>
         <View style={styles.sessionRowRight}>
           <View style={styles.sessionYieldRow}>
-            <Text style={styles.sessionYield}>{value} {unitLabel}</Text>
+            <Text style={[styles.sessionYield, estimated && styles.sessionYieldEstimated]}>
+              {value} {unitLabel}
+            </Text>
             {/* Chevron mirrors the affordance on the animal-profile session
                 rows, so the tap target reads as "open this." */}
             <Text style={styles.sessionChevron}>›</Text>
           </View>
-          {(tags.length > 0 || session.notes) && (
+          {metaParts.length > 0 && (
             <Text style={styles.sessionMeta} numberOfLines={1}>
-              {[...tags, session.notes].filter(Boolean).join(' · ')}
+              {metaParts.join(' · ')}
             </Text>
           )}
         </View>
@@ -693,6 +699,11 @@ const styles = StyleSheet.create({
   sessionTime: { fontSize: 13, color: Colors.charcoal, opacity: 0.55 },
   sessionYieldRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   sessionYield: { fontSize: 15, fontWeight: '800', color: Colors.charcoal },
+  // Estimated sessions read as a guess, not a measurement — italicize and
+  // soften the color so the eye can sort real-data rows from filled-in ones.
+  sessionYieldEstimated: {
+    fontStyle: 'italic', color: Colors.charcoal, opacity: 0.6, fontWeight: '700',
+  },
   sessionChevron: {
     fontSize: 20, color: Colors.charcoal, opacity: 0.3, fontWeight: '600',
     lineHeight: 20,

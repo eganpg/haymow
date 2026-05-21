@@ -146,7 +146,8 @@ haymow/                      ← root project folder (also the app name, tradema
 │       ├── 002_feed_inventory.sql           ← feed_inventory, feed_purchases, feed_entries.feed_inventory_id
 │       ├── 003_feed_session_link.sql        ← feed_entries.milking_session_id (ON DELETE SET NULL)
 │       ├── 004_egg_collections_unique.sql   ← (Reverted in 005) Per-day unique constraint
-│       └── 005_egg_collections_per_log.sql  ← Drops the unique constraint — eggs are now per-trip events
+│       ├── 005_egg_collections_per_log.sql  ← Drops the unique constraint — eggs are now per-trip events
+│       └── 006_milking_estimated.sql        ← milking_sessions.is_estimated boolean for backfilled-from-memory sessions
 ├── README.md
 └── CLAUDE.md
 ```
@@ -182,7 +183,8 @@ create table milking_sessions (
   session_type text check (session_type in ('AM', 'PM', 'single')),
   yield_lbs numeric(6,2),       -- store in lbs, convert to gallons in app (1 gal = 8.6 lbs)
   notes text,
-  health_tags text[],           -- ['mastitis-concern', 'off-feed', 'limping', etc.]
+  health_tags text[],           -- session tags: ['mastitis-concern', 'off-feed', 'limping', 'spilled', etc.]
+  is_estimated boolean default false, -- true when user backfilled a forgotten session from memory (migration 006)
   created_via text default 'app', -- 'app' | 'sms' | 'web'
   created_at timestamptz default now()
 );

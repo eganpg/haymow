@@ -21,6 +21,10 @@ export type MilkingSession = {
   yield_lbs: number;
   notes: string | null;
   health_tags: string[] | null;
+  // True when the user backfilled a forgotten session from memory rather than
+  // measuring it. Stored as its own column (migration 006) so feed→yield
+  // correlation can exclude or down-weight these without parsing tag arrays.
+  is_estimated: boolean;
 };
 
 // Average density of Jersey whole milk. Used everywhere we convert between gallons
@@ -76,6 +80,7 @@ export async function logMilkingSession(params: {
   sessionTime?: string; // ISO; defaults to now
   notes?: string;
   healthTags?: string[];
+  isEstimated?: boolean;
 }) {
   const { data, error } = await supabase
     .from('milking_sessions')
@@ -87,6 +92,7 @@ export async function logMilkingSession(params: {
       yield_lbs: yieldToLbs(params.yieldValue, params.yieldUnit),
       notes: params.notes ?? null,
       health_tags: params.healthTags ?? [],
+      is_estimated: params.isEstimated ?? false,
       created_via: 'app',
     })
     .select()
@@ -124,6 +130,7 @@ export async function updateMilkingSession(params: {
   sessionTime: string; // ISO
   notes?: string;
   healthTags?: string[];
+  isEstimated?: boolean;
   feedEntries: Array<{ feedInventoryId: string; amount: number }>;
 }) {
   // 1. Update the session row, including session_time so the user can correct it.
@@ -135,6 +142,7 @@ export async function updateMilkingSession(params: {
       yield_lbs: yieldToLbs(params.yieldValue, params.yieldUnit),
       notes: params.notes ?? null,
       health_tags: params.healthTags ?? [],
+      is_estimated: params.isEstimated ?? false,
     })
     .eq('id', params.sessionId);
   if (updateError) throw updateError;

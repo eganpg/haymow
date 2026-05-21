@@ -1,6 +1,6 @@
 import {
   StyleSheet, Text, View, Pressable, TextInput,
-  ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView,
+  ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, Switch,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
@@ -24,7 +24,11 @@ type FeedEntry = {
   amount: string;
 };
 
-const HEALTH_TAGS = ['mastitis-concern', 'off-feed', 'limping', 'unusual-behavior'];
+// Free-form chip tags for the session. Stored as text[] in milking_sessions.health_tags.
+// Mix of health concerns (mastitis, off-feed, limping) and event tags (spilled).
+// "estimated" is intentionally NOT here — it has its own boolean column because it
+// describes the record itself, not something observed during milking. See migration 006.
+const SESSION_TAGS = ['mastitis-concern', 'off-feed', 'limping', 'unusual-behavior', 'spilled'];
 const DAIRY_FEED_TYPES = ['grain', 'hay', 'mineral', 'pasture', 'other'];
 
 let entryCounter = 0;
@@ -57,6 +61,7 @@ export default function LogMilkingScreen() {
   const [yieldInput, setYieldInput] = useState('');
   const [notes, setNotes] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [isEstimated, setIsEstimated] = useState(false);
   const [loading, setLoading] = useState(false);
   const [prefillLoading, setPrefillLoading] = useState(isEdit);
   const [sessionTime, setSessionTime] = useState<string>(() => new Date().toISOString());
@@ -100,6 +105,7 @@ export default function LogMilkingScreen() {
         setYieldInput(displayYield.toFixed(2).replace(/\.?0+$/, ''));
         setNotes(session.notes ?? '');
         setSelectedTags(session.health_tags ?? []);
+        setIsEstimated(session.is_estimated ?? false);
 
         if (linkedFeed.length > 0) {
           setShowFeed(true);
@@ -182,6 +188,7 @@ export default function LogMilkingScreen() {
           sessionTime,
           notes: notes.trim() || undefined,
           healthTags: selectedTags,
+          isEstimated,
           feedEntries: feedPayload,
         });
       } else {
@@ -194,6 +201,7 @@ export default function LogMilkingScreen() {
           sessionTime,
           notes: notes.trim() || undefined,
           healthTags: selectedTags,
+          isEstimated,
         });
 
         for (const e of feedPayload) {
@@ -334,6 +342,27 @@ export default function LogMilkingScreen() {
           />
         </View>
 
+        {/* Estimated. Sits directly under Yield because that's the value being
+            flagged as a guess. Stored in its own column (not the chip tags) so
+            analytics can cleanly exclude or down-weight these. */}
+        <View style={styles.section}>
+          <Pressable
+            style={styles.estimatedRow}
+            onPress={() => setIsEstimated(v => !v)}
+          >
+            <View style={styles.estimatedTextCol}>
+              <Text style={styles.label}>Mark as estimated</Text>
+              <Text style={styles.estimatedHint}>For when you forgot to log in the moment.</Text>
+            </View>
+            <Switch
+              value={isEstimated}
+              onValueChange={setIsEstimated}
+              trackColor={{ false: Colors.border, true: Colors.sage }}
+              thumbColor={Colors.white}
+            />
+          </Pressable>
+        </View>
+
         {/* Feed */}
         <View style={styles.section}>
           <Pressable style={styles.feedToggleRow} onPress={() => setShowFeed(v => !v)}>
@@ -369,11 +398,12 @@ export default function LogMilkingScreen() {
           )}
         </View>
 
-        {/* Health tags */}
+        {/* Tags — health concerns and event flags (spilled, etc.). Free-form
+            text[] in DB, so adding to SESSION_TAGS is the only change needed. */}
         <View style={styles.section}>
-          <Text style={styles.label}>Health flags <Text style={styles.dim}>(optional)</Text></Text>
+          <Text style={styles.label}>Tags <Text style={styles.dim}>(optional)</Text></Text>
           <View style={styles.tags}>
-            {HEALTH_TAGS.map(tag => (
+            {SESSION_TAGS.map(tag => (
               <Pressable
                 key={tag}
                 style={[styles.chip, selectedTags.includes(tag) && styles.chipRust]}
@@ -589,6 +619,14 @@ const styles = StyleSheet.create({
   costPreview: { fontSize: 13, color: Colors.sage, fontWeight: '600', paddingLeft: 4 },
   addFeedRow: { paddingTop: 4 },
   addFeedText: { fontSize: 14, fontWeight: '600', color: Colors.sage },
+  estimatedRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: Colors.cream, borderWidth: 1.5, borderColor: Colors.border,
+    borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, minHeight: 52,
+    gap: 16,
+  },
+  estimatedTextCol: { flex: 1, gap: 2 },
+  estimatedHint: { fontSize: 13, color: Colors.charcoal, opacity: 0.55 },
   tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
     backgroundColor: Colors.cream, borderWidth: 1.5, borderColor: Colors.border,
