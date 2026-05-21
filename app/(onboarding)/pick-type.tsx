@@ -2,12 +2,18 @@ import { StyleSheet, Text, View, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import { AnimalType } from '@/lib/queries/animals';
+import { MEAT_BIRDS_ENABLED } from '@/lib/features';
 
+// Full catalog of animal types. The meat_birds entry is filtered out at render
+// time when the MVP flag is off (see lib/features.ts). Dairy copy now mentions
+// goats/sheep so users know the species picker is coming on the next screen.
 const TYPES: { type: AnimalType; emoji: string; label: string; description: string }[] = [
-  { type: 'dairy',      emoji: '🐄', label: 'Dairy Animals', description: 'Cows, milk sessions, lactation tracking' },
+  { type: 'dairy',      emoji: '🐄', label: 'Dairy Animals', description: 'Cows, goats, or sheep — milk sessions and lactation tracking' },
   { type: 'layers',     emoji: '🥚', label: 'Layer Hens',    description: 'Egg collection, lay rate, cost per dozen' },
   { type: 'meat_birds', emoji: '🐔', label: 'Meat Birds',    description: 'Batch tracking, weight, cost per lb' },
 ];
+
+const VISIBLE_TYPES = TYPES.filter(t => t.type !== 'meat_birds' || MEAT_BIRDS_ENABLED);
 
 export default function PickTypeScreen() {
   const router = useRouter();
@@ -24,7 +30,7 @@ export default function PickTypeScreen() {
       </View>
 
       <View style={styles.cards}>
-        {TYPES.map(({ type, emoji, label, description }) => (
+        {VISIBLE_TYPES.map(({ type, emoji, label, description }) => (
           <Pressable
             key={type}
             style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}

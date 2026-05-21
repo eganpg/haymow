@@ -9,6 +9,7 @@ import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
 import { getUserAnimals, getUserFlocks, getUserBatches } from '@/lib/queries/flocks';
 import { getDIM } from '@/lib/queries/milking';
+import { MEAT_BIRDS_ENABLED } from '@/lib/features';
 
 export default function AnimalsScreen() {
   const router = useRouter();
@@ -40,7 +41,12 @@ export default function AnimalsScreen() {
 
   const onRefresh = useCallback(() => { setRefreshing(true); fetchAll(); }, []);
 
-  const hasNothing = animals.length === 0 && flocks.length === 0 && batches.length === 0;
+  // When the MVP flag is off we still fetch batches (cheap, and keeps the data
+  // hot for if the flag flips) but hide the section entirely. Treat batches as
+  // empty for the "no animals set up" check so a flag-off user with old batch
+  // data still sees the empty state.
+  const visibleBatches = MEAT_BIRDS_ENABLED ? batches : [];
+  const hasNothing = animals.length === 0 && flocks.length === 0 && visibleBatches.length === 0;
 
   if (loading) {
     return (
@@ -108,9 +114,9 @@ export default function AnimalsScreen() {
           </Group>
         )}
 
-        {batches.length > 0 && (
+        {visibleBatches.length > 0 && (
           <Group title="Meat Birds">
-            {batches.map(batch => {
+            {visibleBatches.map(batch => {
               const dayOfBatch = Math.floor(
                 (Date.now() - new Date(batch.intake_date).getTime()) / (1000 * 60 * 60 * 24)
               );

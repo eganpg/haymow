@@ -5,14 +5,32 @@ import {
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Colors } from '@/constants/Colors';
-import { AnimalType, createDairyAnimal, createFlock, createMeatBirdBatch } from '@/lib/queries/animals';
+import { AnimalType, DairySpecies, createDairyAnimal, createFlock, createMeatBirdBatch } from '@/lib/queries/animals';
 import { supabase } from '@/lib/supabase';
+import { MEAT_BIRDS_ENABLED } from '@/lib/features';
 
 const TYPES: { type: AnimalType; emoji: string; label: string }[] = [
   { type: 'dairy',      emoji: '🐄', label: 'Dairy Animal' },
   { type: 'layers',     emoji: '🥚', label: 'Layer Flock' },
   { type: 'meat_birds', emoji: '🐔', label: 'Meat Bird Batch' },
 ];
+
+const VISIBLE_TYPES = TYPES.filter(t => t.type !== 'meat_birds' || MEAT_BIRDS_ENABLED);
+
+// Species + per-species breed presets for the dairy picker. Keeping the breed
+// segments species-aware (Jersey for cows, Nubian/Alpine for goats, etc.) means
+// one tap covers the common case; uncommon breeds fall back to "Other".
+const DAIRY_SPECIES: { value: DairySpecies; label: string }[] = [
+  { value: 'cow',   label: 'Cow' },
+  { value: 'goat',  label: 'Goat' },
+  { value: 'sheep', label: 'Sheep' },
+];
+
+const BREED_OPTIONS: Record<DairySpecies, string[]> = {
+  cow:   ['Jersey', 'Other'],
+  goat:  ['Nubian', 'Alpine', 'Other'],
+  sheep: ['East Friesian', 'Other'],
+};
 
 export default function AddAnimalScreen() {
   const router = useRouter();
@@ -23,6 +41,7 @@ export default function AddAnimalScreen() {
 
   // Dairy
   const [animalName, setAnimalName] = useState('');
+  const [species, setSpecies] = useState<DairySpecies>('cow');
   const [breed, setBreed] = useState('Jersey');
   const [fresheningDate, setFresheningDate] = useState('');
 
@@ -51,7 +70,7 @@ export default function AddAnimalScreen() {
       if (type === 'dairy') {
         if (!animalName.trim()) throw new Error('Name is required');
         if (!fresheningDate.trim()) throw new Error('Freshening date is required');
-        await createDairyAnimal(user.id, { name: animalName.trim(), breed, fresheningDate });
+        await createDairyAnimal(user.id, { name: animalName.trim(), species, breed, fresheningDate });
       } else if (type === 'layers') {
         if (!flockName.trim()) throw new Error('Flock name is required');
         if (!henCount.trim() || isNaN(Number(henCount))) throw new Error('Hen count is required');
@@ -79,7 +98,7 @@ export default function AddAnimalScreen() {
         </Pressable>
         <Text style={styles.title}>What are you adding?</Text>
         <View style={styles.cards}>
-          {TYPES.map(({ type: t, emoji, label }) => (
+          {VISIBLE_TYPES.map(({ type: t, emoji, label }) => (
             <Pressable
               key={t}
               style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
@@ -110,10 +129,23 @@ export default function AddAnimalScreen() {
             <Field label="Name" required>
               <TextInput style={styles.input} placeholder="e.g. Nan" value={animalName} onChangeText={setAnimalName} autoCapitalize="words" />
             </Field>
-            <Field label="Breed">
-              <Segmented options={['Jersey', 'Other']} value={breed} onChange={setBreed} />
+            <Field label="Species">
+              <Segmented
+                options={DAIRY_SPECIES.map(s => s.label)}
+                value={DAIRY_SPECIES.find(s => s.value === species)!.label}
+                onChange={(label) => {
+                  const next = DAIRY_SPECIES.find(s => s.label === label)!.value;
+                  setSpecies(next);
+                  // Reset breed when species changes so we don't carry "Jersey"
+                  // over to a goat. Default to the first preset for the species.
+                  setBreed(BREED_OPTIONS[next][0]);
+                }}
+              />
             </Field>
-            <Field label="Freshening date" required hint="The date she last calved">
+            <Field label="Breed">
+              <Segmented options={BREED_OPTIONS[species]} value={breed} onChange={setBreed} />
+            </Field>
+            <Field label="Freshening date" required hint={species === 'cow' ? 'The date she last calved' : species === 'goat' ? 'The date she last kidded' : 'The date she last lambed'}>
               <TextInput style={styles.input} placeholder="YYYY-MM-DD" value={fresheningDate} onChangeText={setFresheningDate} keyboardType="numbers-and-punctuation" />
             </Field>
           </>

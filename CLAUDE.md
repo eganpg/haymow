@@ -26,6 +26,22 @@ Two core insights that make this different from everything on the market:
 
 ---
 
+## MVP Feature Flags
+
+For the customer-facing MVP launch, parts of the app are gated behind env-var feature flags so we can ship a tight surface without ripping incomplete code out of the codebase. Flags live in `lib/features.ts` and read from `EXPO_PUBLIC_*` env vars at build time.
+
+| Flag | Env var | Default | Gates |
+|---|---|---|---|
+| Meat birds | `EXPO_PUBLIC_ENABLE_MEAT_BIRDS` | `false` | Onboarding pick-type card, the Add-Animal flow, the Meat Birds group on the Animals tab, and the `/batch-profile` route (deep-link guard) |
+
+**Why flags, not deletion:** Meat-bird scaffolding (tables, queries, batch profile placeholder) stays in the codebase. When batch tracking is ready we flip the env var to `true` and rebuild — no code restoration needed.
+
+**Operational note:** EXPO_PUBLIC_* vars are baked into the JS bundle at build time. Changing a flag requires restarting the dev server (and a new Expo build for TestFlight/Play). Don't expect runtime toggling.
+
+**Dairy MVP scope:** Dairy is *not* gated. The species picker (cow / goat / sheep) is live in onboarding and Add-Animal so any milking animal can be tracked — the underlying schema already supported it (`animals.species`), the picker just wasn't surfaced until MVP.
+
+---
+
 ## Keeping Docs in Sync
 
 When a checklist item gets completed, an architecture decision is made, or a screen ships, update both `CLAUDE.md` and `README.md` before ending the session — these docs are how future-you stays oriented.
@@ -616,6 +632,9 @@ ANTHROPIC_API_KEY=
 # Weather (Open-Meteo — no key required for basic use)
 USER_ZIP_CODE=               # default zip for weather fetching
 
+# MVP feature flags (see "MVP Feature Flags" section)
+EXPO_PUBLIC_ENABLE_MEAT_BIRDS=false   # set to true to surface meat bird screens in onboarding, Add-Animal, Animals tab, and /batch-profile
+
 # Stripe (billing)
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
@@ -773,7 +792,9 @@ Do not add these without explicit discussion:
 - Veterinary clinical records
 - Multi-user / farm team access
 - Milk or egg sales / invoicing
-- Goats and sheep as distinct animal types (v1 dairy = cows only)
+- Meat bird features (gated off behind `EXPO_PUBLIC_ENABLE_MEAT_BIRDS` for the MVP — see "MVP Feature Flags")
+
+Note: dairy now supports cows, goats, and sheep under the single "dairy" animal type. The species picker lives in onboarding and Add-Animal; the schema (`animals.species`) already permitted all three.
 
 Keep v1 focused. The goal is a working, fast, genuinely useful tool — not a platform.
 
@@ -814,16 +835,16 @@ The guided first-run experience needs to be fully designed before Claude Code bu
 
 **Screen 2 — Pick Your Animal Type**
 - Header: "What do you raise?"
-- Three large cards: 🐄 Dairy Animals / 🥚 Layer Hens / 🐔 Meat Birds
+- Up to three large cards: 🐄 Dairy Animals / 🥚 Layer Hens / 🐔 Meat Birds (the Meat Birds card is hidden when `EXPO_PUBLIC_ENABLE_MEAT_BIRDS` is off, which is the MVP default)
 - Single select (free tier = 1 type)
 - Small note: "You can add more animal types later"
 
 **Screen 3 — Set Up Your First Animal**
 *Branches based on Screen 2 selection:*
 
-- **Dairy:** Name your animal → Pick breed (Jersey / Other) → Enter freshening date (or "I don't know yet")
+- **Dairy:** Name your animal → Pick species (Cow / Goat / Sheep) → Pick breed (presets per species, fallback to Other) → Enter freshening date (cow=calved, goat=kidded, sheep=lambed)
 - **Layers:** Name your flock → How many hens? → When did they start laying? (or "Not sure")
-- **Meat Birds:** Breed (Cornish Cross / Other) → How many birds? → When did chicks arrive?
+- **Meat Birds:** Breed (Cornish Cross / Other) → How many birds? → When did chicks arrive? *(gated off in MVP)*
 
 **Screen 4 — You're Ready**
 - Summary card: "Nan is set up. Ready to log your first session?"

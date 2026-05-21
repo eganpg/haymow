@@ -5,12 +5,33 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Colors } from '@/constants/Colors';
-import { AnimalType, createDairyAnimal, createFlock, createMeatBirdBatch } from '@/lib/queries/animals';
+import { AnimalType, DairySpecies, createDairyAnimal, createFlock, createMeatBirdBatch } from '@/lib/queries/animals';
 import { createSubscription, getTotalUserCount } from '@/lib/queries/user';
 import { supabase } from '@/lib/supabase';
 import { useApp } from '@/lib/AppContext';
 
 const FOUNDING_MEMBER_LIMIT = 500;
+
+// Species + per-species breed presets for the dairy picker. Mirrors add-animal.tsx
+// so adding a second dairy animal later looks the same as the first one. Keep these
+// short — exhaustive breed lists belong behind "Other" + a freeform field.
+const DAIRY_SPECIES: { value: DairySpecies; label: string }[] = [
+  { value: 'cow',   label: 'Cow' },
+  { value: 'goat',  label: 'Goat' },
+  { value: 'sheep', label: 'Sheep' },
+];
+
+const BREED_OPTIONS: Record<DairySpecies, string[]> = {
+  cow:   ['Jersey', 'Other'],
+  goat:  ['Nubian', 'Alpine', 'Other'],
+  sheep: ['East Friesian', 'Other'],
+};
+
+const FRESHENING_HINT: Record<DairySpecies, string> = {
+  cow:   'The date she last calved — this determines days in milk',
+  goat:  'The date she last kidded — this determines days in milk',
+  sheep: 'The date she last lambed — this determines days in milk',
+};
 
 export default function SetupAnimalScreen() {
   const { type } = useLocalSearchParams<{ type: AnimalType }>();
@@ -21,6 +42,7 @@ export default function SetupAnimalScreen() {
 
   // Dairy fields
   const [animalName, setAnimalName] = useState('');
+  const [species, setSpecies] = useState<DairySpecies>('cow');
   const [breed, setBreed] = useState('Jersey');
   const [fresheningDate, setFresheningDate] = useState('');
 
@@ -58,7 +80,7 @@ export default function SetupAnimalScreen() {
       if (type === 'dairy') {
         if (!animalName.trim()) throw new Error('Name is required');
         if (!fresheningDate.trim()) throw new Error('Freshening date is required');
-        await createDairyAnimal(user.id, { name: animalName.trim(), breed, fresheningDate });
+        await createDairyAnimal(user.id, { name: animalName.trim(), species, breed, fresheningDate });
         displayName = animalName.trim();
 
       } else if (type === 'layers') {
@@ -115,9 +137,27 @@ export default function SetupAnimalScreen() {
               />
             </Field>
 
+            <Field label="Species">
+              <View style={styles.segmented}>
+                {DAIRY_SPECIES.map(({ value, label }) => (
+                  <Pressable
+                    key={value}
+                    style={[styles.segment, species === value && styles.segmentActive]}
+                    onPress={() => {
+                      setSpecies(value);
+                      // Reset breed so a goat doesn't carry a "Jersey" label.
+                      setBreed(BREED_OPTIONS[value][0]);
+                    }}
+                  >
+                    <Text style={[styles.segmentText, species === value && styles.segmentTextActive]}>{label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </Field>
+
             <Field label="Breed">
               <View style={styles.segmented}>
-                {['Jersey', 'Other'].map((b) => (
+                {BREED_OPTIONS[species].map((b) => (
                   <Pressable
                     key={b}
                     style={[styles.segment, breed === b && styles.segmentActive]}
@@ -129,7 +169,7 @@ export default function SetupAnimalScreen() {
               </View>
             </Field>
 
-            <Field label="Freshening date" required hint="The date she last calved — this determines days in milk">
+            <Field label="Freshening date" required hint={FRESHENING_HINT[species]}>
               <TextInput
                 style={styles.input}
                 placeholder="YYYY-MM-DD"

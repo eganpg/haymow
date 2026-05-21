@@ -11,10 +11,19 @@ import { supabase } from '../supabase';
 // rules in the subscription tier limits (1 type free, 3 on homestead, ∞ on full_farm).
 export type AnimalType = 'dairy' | 'layers' | 'meat_birds';
 
-// Create a dairy animal (cow, in v1). Freshening date = the date she calved and
-// started lactating. Stored on the animal so we can compute Days In Milk (DIM).
+// Species under the "dairy" umbrella. The animals table already accepts all
+// three (see migration 001 check constraint), so this is purely a TS guard for
+// the UI picker. Opened up for MVP: dairy is no longer cow-only — anyone with
+// a milking animal can use the app.
+export type DairySpecies = 'cow' | 'goat' | 'sheep';
+
+// Create a dairy animal. Freshening date = the date she last gave birth and
+// started lactating (calving for cows, kidding for goats, lambing for sheep) —
+// stored on the animal so we can compute Days In Milk (DIM). Species defaults
+// to cow for callers that haven't been updated yet.
 export async function createDairyAnimal(userId: string, data: {
   name: string;
+  species?: DairySpecies;
   breed: string;
   fresheningDate: string; // ISO date string
 }) {
@@ -24,7 +33,7 @@ export async function createDairyAnimal(userId: string, data: {
       user_id: userId,
       name: data.name,
       breed: data.breed,
-      species: 'cow',
+      species: data.species ?? 'cow',
       freshening_date: data.fresheningDate,
     })
     .select()

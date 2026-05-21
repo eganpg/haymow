@@ -1,9 +1,24 @@
 import { StyleSheet, Text, View, Pressable } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useEffect } from 'react';
 import { Colors } from '@/constants/Colors';
+import { MEAT_BIRDS_ENABLED } from '@/lib/features';
 
 export default function BatchProfileScreen() {
   const router = useRouter();
+
+  // Defense-in-depth: even though the Animals tab doesn't surface batch rows
+  // when the MVP flag is off, a stale deep link or in-app navigation could
+  // still land a user here. Bounce them back to the animals list so the app
+  // never shows a meat-bird surface that the rest of the UI is hiding.
+  useEffect(() => {
+    if (!MEAT_BIRDS_ENABLED) {
+      router.replace('/(tabs)/animals');
+    }
+  }, [router]);
+
+  if (!MEAT_BIRDS_ENABLED) return null;
+
   return (
     <View style={styles.container}>
       <Pressable onPress={() => router.back()} style={styles.backButton}>

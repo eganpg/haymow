@@ -302,7 +302,9 @@ Full Farm:
 - Breeding / reproductive cycle tracking
 - Multi-farm / multi-user enterprise features
 - Milk or egg sales / commercial invoicing
-- Goats and sheep as distinct animal types (v1 dairy = cows only; expand later)
+- Meat bird tracking is **gated off for the MVP launch** behind the `EXPO_PUBLIC_ENABLE_MEAT_BIRDS` flag — the scaffolding stays in the codebase, but the screens are hidden until batch tracking is ready. See `CLAUDE.md` "MVP Feature Flags."
+
+Dairy now covers cows, goats, and sheep — a species picker is part of onboarding and Add-Animal.
 
 These are candidates for future versions based on user demand.
 
@@ -376,9 +378,10 @@ Existing tools and why they don't serve this user:
 - Lactation curve view
 - Feed-to-yield correlation
 - Egg trends / cost per dozen
-- Meat bird batch profile
 - Milk processing log
 - Farm economics dashboard
+
+**MVP scope (customer launch):** Dairy (cow / goat / sheep) + Layer hens. Meat bird tracking is feature-flagged off (`EXPO_PUBLIC_ENABLE_MEAT_BIRDS=false`) and will return when batch tracking is ready.
 
 **Deferred to v2:**
 - Stripe billing integration (all users on free tier for now)
