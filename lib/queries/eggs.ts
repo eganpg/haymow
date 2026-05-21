@@ -69,6 +69,9 @@ export async function getTodaysEggSummary(flockId: string): Promise<EggDailySumm
 // for the same flock on the same day are intentional (they represent separate
 // trips to the coop) and add to the daily total via getTodaysEggSummary.
 // Optional fields default to 0/null — the only required input is egg count.
+// collectionDate is optional and defaults to today's local calendar date; the
+// log-eggs screen surfaces a date picker so the user can backfill yesterday's
+// collection if they forgot to log it at the time.
 export async function logEggCollection(params: {
   flockId: string;
   userId: string;
@@ -76,15 +79,16 @@ export async function logEggCollection(params: {
   brokenCount?: number;
   softShellCount?: number;
   notes?: string;
+  collectionDate?: string; // YYYY-MM-DD, local calendar
 }) {
-  const today = localDateKey(new Date());
+  const date = params.collectionDate ?? localDateKey(new Date());
 
   const { data, error } = await supabase
     .from('egg_collections')
     .insert({
       flock_id: params.flockId,
       user_id: params.userId,
-      collection_date: today,
+      collection_date: date,
       egg_count: params.eggCount,
       broken_count: params.brokenCount ?? 0,
       soft_shell_count: params.softShellCount ?? 0,

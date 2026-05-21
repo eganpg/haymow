@@ -26,6 +26,28 @@ Two core insights that make this different from everything on the market:
 
 ---
 
+## Logging-screen Conventions
+
+Every log screen must let the user pick the date (or date+time) of the event being logged — defaults to "now" but expandable to a picker so backfilling a forgotten session takes one tap. This is non-negotiable: homesteaders forget to log, and the alternative is bad data ("estimated" yields all over the place when really they were just logged the next morning at the correct count).
+
+Two reusable components own the picker UX:
+
+| Component | Storage column type | Use it for |
+|---|---|---|
+| `components/DateTimeField.tsx` | `timestamptz` | Dairy milking sessions — time-of-day matters for the 12-hour feed→yield correlation join |
+| `components/DateField.tsx` | `date` | Egg collections, meat-bird weight samples, meat-bird mortality, meat-bird processing — daily granularity is sufficient |
+
+**Active log screens with date pickers**: `log-milking.tsx` (DateTimeField, "Logged at"), `log-eggs.tsx` (DateField, "Date").
+
+**Future log screens that must include one from day one** (currently behind `EXPO_PUBLIC_ENABLE_MEAT_BIRDS=false`):
+- Log weight sample → `DateField`
+- Log mortality → `DateField`
+- Meat-bird processing → `DateField`
+
+Pattern: collapsed pressable row showing the formatted value + "Change" link, expands to the picker + Done button. Mirror the styles from `log-milking.tsx` (`timeRow`, `timeRowLabel`, `timeRowValue`, `timeRowChange`, `timePickerBlock`, `timePickerDone`). When linked feed entries get logged on a backdated session, stamp their `entry_time` at noon-local on the picked date so they sit in the same local-date bucket as the parent session.
+
+---
+
 ## MVP Feature Flags
 
 For the customer-facing MVP launch, parts of the app are gated behind env-var feature flags so we can ship a tight surface without ripping incomplete code out of the codebase. Flags live in `lib/features.ts` and read from `EXPO_PUBLIC_*` env vars at build time.

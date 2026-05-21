@@ -8,6 +8,7 @@ import { Colors } from '@/constants/Colors';
 import { logEggCollection } from '@/lib/queries/eggs';
 import { logFeedUsage, getFeedInventory, FeedInventoryItem } from '@/lib/queries/feedInventory';
 import { supabase } from '@/lib/supabase';
+import { DateField, todayLocalKey } from '@/components/DateField';
 
 type FeedEntry = {
   id: string;
@@ -22,6 +23,31 @@ function newEntry(): FeedEntry {
   return { id: String(entryCounter++), feedInventoryId: null, amount: '' };
 }
 
+// Human-friendly label for the collapsed Date row. Shows "Today" / "Yesterday"
+// for the common cases, falls back to "Mon, May 11" for older backfills so the
+// row reads at a glance without needing the full numeric date.
+function formatCollectionDate(yyyymmdd: string): string {
+  const today = todayLocalKey();
+  if (yyyymmdd === today) return 'Today';
+  const [y, m, d] = yyyymmdd.split('-').map(Number);
+  // Build the date in local time to avoid the UTC-midnight-shifts-a-day pitfall.
+  const picked = new Date(y, m - 1, d);
+  const yesterday = new Date();
+  yesterday.setHours(0, 0, 0, 0);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (picked.getTime() === yesterday.getTime()) return 'Yesterday';
+  return picked.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+// Build an ISO timestamp at noon local on the given date. Used for the
+// linked feed_entries.entry_time when the user backdates a collection — noon
+// is unambiguous (no day-boundary edge cases) and keeps the feed row in the
+// same local-date bucket as the egg collection it was logged with.
+function noonLocalISO(yyyymmdd: string): string {
+  const [y, m, d] = yyyymmdd.split('-').map(Number);
+  return new Date(y, m - 1, d, 12, 0, 0, 0).toISOString();
+}
+
 export default function LogEggsScreen() {
   const { flockId, flockName } = useLocalSearchParams<{ flockId: string; flockName: string }>();
   const router = useRouter();
@@ -30,6 +56,8 @@ export default function LogEggsScreen() {
   const [brokenCount, setBrokenCount] = useState('');
   const [softShellCount, setSoftShellCount] = useState('');
   const [notes, setNotes] = useState('');
+  const [collectionDate, setCollectionDate] = useState<string>(() => todayLocalKey());
+  const [showDatePicker, setShowDatePicker] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -92,7 +120,15 @@ export default function LogEggsScreen() {
         brokenCount: parseInt(brokenCount, 10) || 0,
         softShellCount: parseInt(softShellCount, 10) || 0,
         notes: notes.trim() || undefined,
+        collectionDate,
       });
+
+      // Stamp linked feed entries at noon on the picked date so they sit in
+      // the same local-date bucket as the egg row (matters for any future
+      // feed-cost-per-dozen rollup that buckets by day).
+      const feedEntryTime = collectionDate === todayLocalKey()
+        ? undefined
+        : noonLocalISO(collectionDate);
 
       await Promise.all(
         validFeedEntries.map(e =>
@@ -101,6 +137,7 @@ export default function LogEggsScreen() {
             feedInventoryId: e.feedInventoryId!,
             flockId,
             amount: parseFloat(e.amount),
+            entryTime: feedEntryTime,
           })
         )
       );
@@ -122,6 +159,38 @@ export default function LogEggsScreen() {
         </View>
 
         {error && <Text style={styles.error}>{error}</Text>}
+
+        {/* Date. Mirrors the dairy "Logged at" pattern: collapsed row that
+            shows the picked date and a Change link; expands to a date picker
+            so the user can backfill a forgotten collection. Date-only (no
+            time) because egg_collections.collection_date is a DATE column —
+            time-of-day doesn't matter for the daily-total rollup. */}
+        <View style={styles.section}>
+          {!showDatePicker ? (
+            <Pressable style={styles.timeRow} onPress={() => setShowDatePicker(true)}>
+              <Text style={styles.timeRowLabel}>Date</Text>
+              <View style={styles.timeRowRight}>
+                <Text style={styles.timeRowValue}>{formatCollectionDate(collectionDate)}</Text>
+                <Text style={styles.timeRowChange}>Change</Text>
+              </View>
+            </Pressable>
+          ) : (
+            <View style={styles.timePickerBlock}>
+              <Text style={styles.label}>Date</Text>
+              <DateField
+                value={collectionDate}
+                onChange={setCollectionDate}
+                onError={setError}
+              />
+              <Pressable
+                style={styles.timePickerDone}
+                onPress={() => setShowDatePicker(false)}
+              >
+                <Text style={styles.timePickerDoneText}>Done</Text>
+              </Pressable>
+            </View>
+          )}
+        </View>
 
         <View style={styles.section}>
           <Text style={styles.label}>Eggs collected</Text>
@@ -307,6 +376,18 @@ const styles = StyleSheet.create({
     fontSize: 18, color: Colors.charcoal, minHeight: 52,
   },
   notesInput: { fontSize: 15, minHeight: 80, textAlignVertical: 'top' },
+  timeRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: Colors.cream, borderWidth: 1.5, borderColor: Colors.border,
+    borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, minHeight: 52,
+  },
+  timeRowLabel: { fontSize: 15, fontWeight: '600', color: Colors.charcoal },
+  timeRowRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  timeRowValue: { fontSize: 15, color: Colors.charcoal, opacity: 0.65, fontWeight: '500' },
+  timeRowChange: { fontSize: 14, color: Colors.sage, fontWeight: '700' },
+  timePickerBlock: { gap: 10 },
+  timePickerDone: { alignSelf: 'flex-start', paddingVertical: 6, paddingHorizontal: 12 },
+  timePickerDoneText: { fontSize: 14, fontWeight: '700', color: Colors.sage },
   feedToggleRow: { paddingVertical: 4 },
   feedToggleText: { fontSize: 15, fontWeight: '600', color: Colors.sage },
   feedBlock: {
