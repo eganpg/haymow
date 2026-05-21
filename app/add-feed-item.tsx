@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
 import { createFeedItem, updateFeedItem, deleteFeedItem } from '@/lib/queries/feedInventory';
+import { MEAT_BIRDS_ENABLED } from '@/lib/features';
 
 type FeedCategory = 'dairy' | 'layers' | 'meat_birds' | 'other';
 
@@ -202,10 +203,14 @@ export default function AddFeedItemScreen() {
           />
         </Field>
 
-        {/* Category */}
+        {/* Category. Hide Meat Birds when the MVP flag is off, but keep it
+            visible if the user is editing a pre-existing meat-bird feed item
+            (so the segmented control still shows the selected option). */}
         <Field label="Used for">
           <View style={styles.segmented}>
-            {CATEGORIES.map(c => (
+            {CATEGORIES.filter(c =>
+              c.value !== 'meat_birds' || MEAT_BIRDS_ENABLED || category === 'meat_birds'
+            ).map(c => (
               <Pressable
                 key={c.value}
                 style={[styles.segment, category === c.value && styles.segmentActive]}
